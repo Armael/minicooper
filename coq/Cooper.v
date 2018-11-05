@@ -767,6 +767,8 @@ Ltac classical :=
 
 (* ------------------------------------------------------------------------- *)
 
+(* [wff] and [nnf] both entail that the formula is quantifier-free. *)
+
 Lemma qf_nnf:
   forall f,
   nnf f ->
@@ -2568,27 +2570,6 @@ Proof.
   all. apply~ all_disjunction.
 Qed.
 
-Lemma nnf_map_disjuncts:
-  forall transform f,
-  nnf f ->
-  (forall x, nnf x -> nnf (transform x)) ->
-  nnf (map_disjuncts transform f).
-Proof.
-  intros. destruct f; simpl; eauto.
-  nnf. apply~ nnf_disjunction.
-Qed.
-
-Lemma qf_qe:
-  forall f,
-  qf (qe f).
-Proof.
-  induction f; intros; simpl in *;
-    eauto using wf_conjunction, wf_disjunction, wf_negation.
-  apply qf_nnf.
-  apply nnf_map_disjuncts. now apply nnf_posnnf.
-  eauto using nnf_cooper.
-Qed.
-
 Lemma wf_qe:
   forall f,
   wff_ue f ->
@@ -2616,7 +2597,7 @@ Proof.
   (* FExists case *)
   cbn [qe].
   assert (wff (posnnf (qe f))). now apply wf_posnnf, wf_qe.
-  assert (nnf (posnnf (qe f))). now apply nnf_posnnf, qf_qe.
+  assert (nnf (posnnf (qe f))). now apply nnf_posnnf, qf_wff, wf_qe.
   transitivity (interpret_formula env (cooper (posnnf (qe f)))); cycle 1.
   { rewrite~ interpret_cooper. simpl. apply exists_equivalence.
     intro. rewrite~ interpret_posnnf. }
