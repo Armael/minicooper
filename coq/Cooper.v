@@ -626,7 +626,8 @@ Inductive all (P : predicate -> term -> Prop) : formula -> Prop :=
 Notation qf f :=
   (all (fun p t => True) f).
 
-(* A characterization of NNF form: negations are applied only to atoms.
+(* A characterization of NNF form: negations are applied only to atoms,
+   and negated inequalities are not permitted.
    Our NNF forms are quantifier-free. *)
 
 Inductive nnf : formula -> Prop :=
@@ -635,6 +636,7 @@ Inductive nnf : formula -> Prop :=
     nnf (FAtom p t)
 | nnf_FNot_FAtom:
     forall p t,
+    p <> Lt ->
     nnf (FNot (FAtom p t))
 | nnf_FAnd:
     forall f1 f2,
@@ -652,6 +654,7 @@ Inductive nnf : formula -> Prop :=
     nnf FFalse.
 
 Hint Constructors all nnf.
+Hint Extern 1 (_ <> Lt) => congruence.
 
 (* The predicate [all P] is covariant in [P]. *)
 
@@ -794,6 +797,15 @@ Proof.
   intros; destruct f1; destruct f2; simpl in *; eauto.
 Qed.
 
+Lemma nnf_conjunction:
+  forall f1 f2,
+  nnf f1 ->
+  nnf f2 ->
+  nnf (conjunction f1 f2).
+Proof.
+  intros; destruct f1; destruct f2; simpl in *; eauto.
+Qed.
+
 Definition disjunction f1 f2 :=
   match f1, f2 with
   | FTrue, _
@@ -818,6 +830,15 @@ Lemma wf_disjunction:
   wff f1 ->
   wff f2 ->
   wff (disjunction f1 f2).
+Proof.
+  intros; destruct f1; destruct f2; simpl in *; eauto.
+Qed.
+
+Lemma nnf_disjunction:
+  forall f1 f2,
+  nnf f1 ->
+  nnf f2 ->
+  nnf (disjunction f1 f2).
 Proof.
   intros; destruct f1; destruct f2; simpl in *; eauto.
 Qed.
@@ -889,6 +910,17 @@ Proof.
   apply all_disjunction; eauto.
 Qed.
 
+Lemma nnf_big_disjunction:
+  forall A (F : A -> formula) (l : list A),
+  (forall x,
+   In x l ->
+   nnf (F x)) ->
+  nnf (big_disjunction F l).
+Proof.
+  intros. induction l; simpl in *; eauto.
+  apply nnf_disjunction; eauto.
+Qed.
+
 Lemma big_or_prove : forall A (P : A -> Prop) l x,
   In x l ->
   P x ->
@@ -915,6 +947,23 @@ Proof.
   rewrite IHl, E; tauto.
 Qed.
 
+Lemma big_or_distr : forall A (P1 P2 : A -> Prop) l,
+  big_or (fun x => P1 x \/ P2 x) l <->
+  big_or P1 l \/ big_or P2 l.
+Proof.
+  induction l; intros; simpl in *; tauto.
+Qed.
+
+(* Or we could setup rewriting under [big_or]... *)
+Lemma interpret_big_disjunction2:
+  forall A B env (F : A -> B -> formula) l1 l2,
+  interpret_formula env (big_disjunction (fun x => big_disjunction (F x) l1) l2) <->
+  big_or (fun x => big_or (fun y => interpret_formula env (F x y)) l1) l2.
+Proof.
+  intros. rewrite interpret_big_disjunction. apply big_or_extens.
+  intros. rewrite interpret_big_disjunction. reflexivity.
+Qed.
+
 (* Lemma interval_measure_decr : forall x, *)
 (*   0 < x -> *)
 (*   x <> 1 -> *)
@@ -938,22 +987,33 @@ Qed.
 
 (* [0, n) *)
 
-Fixpoint interval (n : nat) : list Z :=
+Fixpoint interval' (n : nat) : list Z :=
   match n with
   | O => []
-  | S n' => Z.of_nat n' :: interval n'
+  | S n' => Z.of_nat n' :: interval' n'
   end.
 
-Lemma In_interval : forall x n,
-  0 <= x ->
-  x < Z.of_nat n ->
-  In x (interval n).
+Lemma In_interval' : forall x n,
+  In x (interval' n) <-> 0 <= x < Z.of_nat n.
 Proof.
   induction n; intros.
-  - false. lia.
-  - cbn [interval In]. destruct (Z.eq_dec (Z.of_nat n) x).
-    + now auto with zarith.
-    + right. assert (x < Z.of_nat n) by lia. auto.
+  - simpl. lia.
+  - cbn [interval' In]. destruct (Z.eq_dec x (Z.of_nat n)); [ lia |].
+    split; intro.
+    + enough (0 <= x < Z.of_nat n) by lia. rewrite <-IHn.
+      now branches; [ false | auto ].
+    + rewrite IHn. lia.
+Qed.
+
+Definition interval (x : Z) : list Z :=
+  interval' (Z.to_nat x).
+
+Lemma In_interval : forall x n,
+  In x (interval n) <-> 0 <= x < n.
+Proof.
+  intros. unfold interval. rewrite In_interval'.
+  split; intro; rewrite Z2Nat.id in *; try lia.
+  destruct n; simpl in *; lia.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
@@ -1313,6 +1373,16 @@ Proof.
   eassumption.
 Qed.
 
+Lemma nnf_adjust:
+  forall f l,
+  nnf f ->
+  nnf (adjust l f).
+Proof.
+  induction f; intros; simpl in *; nnf; eauto.
+  { predicate; term; eauto. }
+  { unfold adjust. predicate; term; eauto. }
+Qed.
+
 (* After the formula has been transformed using [adjust], all coefficients of
    [x] are 1, except in inequality atoms, where they might be 1 or -1. *)
 
@@ -1341,6 +1411,8 @@ Proof.
   induction f; intros; simpl in *; all; eauto.
   unfold normal in *. predicate; term; unpack; eauto.
 Qed.
+
+Hint Resolve wf_normal.
 
 Lemma normal_adjust:
   forall l,
@@ -1467,6 +1539,21 @@ Proof.
     econstructor. splits~. apply~ formula_lcm_nonneg.
 Qed.
 
+Lemma wf_unity:
+  forall f,
+  wff f ->
+  wff (unity f).
+Proof. eauto using normal_unity. Qed.
+
+Lemma nnf_unity:
+  forall f,
+  nnf f ->
+  nnf (unity f).
+Proof.
+  induction f; intros; simpl in *; nnf; eauto;
+    unfold unity; case_if; eauto using nnf_adjust.
+Qed.
+
 (* ------------------------------------------------------------------------- *)
 
 (* A subset of Z either admits arbitrarily large negative elements or admits a
@@ -1578,6 +1665,14 @@ Proof.
   introv [ h | [ x [ ? ? ]]].
   specializes h 0. unpack. eauto.
   eauto.
+Qed.
+
+Lemma exists_equiv_sink_or_least_element:
+  forall P : Z -> Prop,
+  (exists x, P x) <-> sink P \/ least_element P.
+Proof.
+  intros; split;
+    eauto using sink_or_least_element, sink_or_least_element_reciprocal.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
@@ -1696,6 +1791,17 @@ Proof.
   match goal with |- wff (match ?y with _ => _ end) =>
     destruct y
   end; try case_if; eauto.
+Qed.
+
+Lemma nnf_minusinf:
+  forall f,
+  nnf f ->
+  nnf (minusinf f).
+Proof.
+  induction f; intros; nnf; simpl in *;
+    eauto using nnf_conjunction, nnf_disjunction.
+  { predicate; term; eauto; case_if; eauto. }
+  { predicate; term; eauto; simpl in *; eauto; congruence. }
 Qed.
 
 Lemma sink_minusinf_equiv:
@@ -1857,13 +1963,12 @@ Lemma invariant_modulo_exists_equiv_big_or:
   forall D : Z,
   0 < D ->
   (forall x k, P x <-> P (x + k * D)) ->
-  (exists y, P y) <-> big_or P (interval (Z.to_nat D)).
+  (exists y, P y) <-> big_or P (interval D).
 Proof.
   introv HD HPinv.
   split.
   { intros [y Hy]. apply big_or_prove with (y mod D).
-    - forwards~: Z.mod_pos_bound y D.
-      apply In_interval. lia. rewrite Z2Nat.id; lia.
+    - forwards~: Z.mod_pos_bound y D. rewrite In_interval. lia.
     - rewrite HPinv with (k := y / D).
       rewrite Z.add_comm, Z.mul_comm, <-Z.div_mod; auto. }
   { intro H. forwards [i [H1 H2]]: big_or_inv H. firstorder. }
@@ -1874,7 +1979,7 @@ Lemma sink_equiv_big_or:
   forall D : Z,
   0 < D ->
   (forall x k, P x <-> P (x + k * D)) ->
-  sink P <-> big_or P (interval (Z.to_nat D)).
+  sink P <-> big_or P (interval D).
 Proof.
   intros.
   rewrite sink_invariant_modulo_equiv_exists with D by auto.
@@ -1937,6 +2042,17 @@ Proof.
   wff. destruct t; [destruct n|]; wft; eauto using wf_add, wf_mul.
 Qed.
 
+Lemma nnf_subst:
+  forall f t,
+  nnf f ->
+  nnf (subst t f).
+Proof.
+  induction f; intros; simpl in *; nnf; eauto; simpl;
+  repeat
+    match goal with |- context [ match ?x with _ => _ end ] => destruct x end;
+  eauto.
+Qed.
+
 (* ------------------------------------------------------------------------- *)
 
 Fixpoint shift_term (t : term) : term :=
@@ -1989,54 +2105,46 @@ Proof.
   wff. rewrite~ interpret_shift_term. tauto.
 Qed.
 
-(* ------------------------------------------------------------------------- *)
-
-Notation sink_interpret env f := (sink (fun x => interpret_formula (extend env x) f)).
-
-Definition sinkf (f : formula) :=
-  shift (
-    big_disjunction (fun i => subst (TConstant i) (minusinf f))
-      (interval (Z.to_nat (divlcm f)))
-  ).
-
-Lemma sink_qe:
-  forall env f,
-  all normal f ->
-  sink_interpret env f <-> interpret_formula env (sinkf f).
+Lemma wf_shift:
+  forall f,
+  wff1 f ->
+  wff (shift f).
 Proof.
-  intros. rewrite~ sink_minusinf_equiv.
-  rewrite sink_equiv_big_or with (D := divlcm f); cycle 1.
-  now apply divlcm_nonneg; apply wf_normal.
-  now eauto using interpret_minusinf_modulo_divlcm, wf_normal.
-  unfold sinkf. rewrite interpret_shift.
-  { rewrite interpret_big_disjunction.
-    apply big_or_extens.
-    intro. rewrite interpret_subst. reflexivity.
-    now apply wf_minusinf, wf_normal. }
-  { apply all_big_disjunction. intros.
-    now apply wf1_subst, wf_minusinf, wf_normal. }
-  Unshelve. exact 0.
+  induction f; intros; simpl in *; all; unpack; eauto using wf_shift_term.
+Qed.
+
+Lemma nnf_shift:
+  forall f,
+  nnf f ->
+  nnf (shift f).
+Proof.
+  induction f; intros; simpl in *; nnf; eauto. constructor~.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
 
-Inductive negated_ineq : formula -> Prop :=
-| NegatedIneqAtom : forall t,
-  negated_ineq (FNot (FAtom Lt t))
-| NegatedIneqAndL : forall f1 f2,
-  negated_ineq f1 ->
-  negated_ineq (FAnd f1 f2)
-| NegatedIneqAndR : forall f1 f2,
-  negated_ineq f2 ->
-  negated_ineq (FAnd f1 f2)
-| NegatedIneqOrL : forall f1 f2,
-  negated_ineq f1 ->
-  negated_ineq (FOr f1 f2)
-| NegatedIneqOrR : forall f1 f2,
-  negated_ineq f2 ->
-  negated_ineq (FOr f1 f2).
+Notation sink_interpret env f := (sink (fun x => interpret_formula (extend env x) f)).
 
-Hint Constructors negated_ineq.
+Notation sink_interpret_qe env f := (
+  interpret_formula env (
+    big_disjunction (fun i => subst (TConstant i) (minusinf f))
+      (interval (divlcm f))
+  )
+).
+
+Lemma sink_qe:
+  forall env f u,
+  all normal f ->
+  sink_interpret env f <-> sink_interpret_qe (extend env u) f.
+Proof.
+  intros. rewrite~ sink_minusinf_equiv.
+  rewrite sink_equiv_big_or with (D := divlcm f); cycle 1.
+  now apply~ divlcm_nonneg.
+  now eauto using interpret_minusinf_modulo_divlcm.
+  rewrite interpret_big_disjunction. apply big_or_extens.
+  intro. rewrite interpret_subst. reflexivity.
+  now apply~ wf_minusinf.
+Qed.
 
 (* ------------------------------------------------------------------------- *)
 
@@ -2102,13 +2210,21 @@ Proof.
     wft. eauto using wf_add, wf_neg. }
 Qed.
 
+Lemma wf1_In_bset:
+  forall f t,
+  wff f ->
+  In t (bset f) ->
+  wft 1 t.
+Proof.
+  intros. forwards~ HH: wf1_bset f. rewrite~ Forall_forall in HH.
+Qed.
+
 Lemma bset_correct:
   forall env f D x u,
   all normal f ->
   nnf f ->
   0 < D ->
   all (dvdvx D) f ->
-  ~ negated_ineq f ->
   interpret_formula (extend env x) f ->
   ~ interpret_formula (extend env (x - D)) f ->
   exists b j,
@@ -2147,7 +2263,7 @@ Proof.
     rewrite Z.eqb_neq in *. false.
     erewrite extend_insensitive with (n1:=x-D) (n2:=x) in *; eauto.
     nia. }
-  { false. predicate; term; simpl in *; eauto; classical.
+  { false. predicate; term; nnf; simpl in *; eauto; classical.
     - wft. erewrite extend_insensitive with (n1:=x-D) in *; eauto.
     - unpack. subst. rewrite Z.mul_1_l in *.
       erewrite extend_insensitive with (n1:=x-D) (n2:=x) in *; eauto.
@@ -2180,7 +2296,6 @@ Lemma bset_correct_divlcm:
   forall env f x u,
   all normal f ->
   nnf f ->
-  ~ negated_ineq f ->
   interpret_formula (extend env x) f ->
   ~ interpret_formula (extend env (x - divlcm f)) f ->
   exists b j,
@@ -2190,8 +2305,150 @@ Lemma bset_correct_divlcm:
 Proof.
   intros.
   apply~ bset_correct.
-  now apply divlcm_nonneg, wf_normal.
-  now apply all_dvdvx_divlcm, wf_normal.
+  now apply~ divlcm_nonneg.
+  now apply~ all_dvdvx_divlcm.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
+
+Notation least_element_interpret env f :=
+  (least_element (fun x => interpret_formula (extend env x) f)).
+
+Notation least_element_interpret_qe env f := (
+  interpret_formula env (
+    big_disjunction (fun i =>
+      big_disjunction (fun b =>
+        subst (add b (TConstant i)) f
+      ) (bset f)
+    ) (interval (divlcm f))
+  )
+).
+
+Lemma least_element_qe:
+  forall env f u,
+  all normal f ->
+  nnf f ->
+  least_element_interpret env f ->
+  least_element_interpret_qe (extend env u) f.
+Proof.
+  intros ? ? ? ? ?.
+  { intros [x [Hf Hnf]]. pose (D := divlcm f). forwards~: divlcm_nonneg f.
+    specializes Hnf (x - D) __. subst D; lia.
+    rewrite interpret_big_disjunction2.
+    forwards~ [b [j (Hx&?&?)]]: bset_correct_divlcm env f x.
+    apply big_or_prove with j; auto. rewrite~ In_interval.
+    apply big_or_prove with b; auto.
+    rewrite~ interpret_subst. rewrite interpret_add. simpl.
+    rewrite Hx in Hf. apply Hf. }
+
+
+
+  (* { intros Hqe. rewrite interpret_big_disjunction2 in Hqe. *)
+  (*   apply big_or_inv in Hqe. destruct Hqe as [j [? Hqe]]. *)
+  (*   apply big_or_inv in Hqe. destruct Hqe as [b [? Hqe]]. *)
+  (*   rewrite interpret_subst, interpret_add in Hqe; auto. *)
+  (*   simpl in *. eexists. split. eassumption. *)
+  (*   intros. *)
+Qed.
+
+
+
+
+
+
+(* ------------------------------------------------------------------------- *)
+
+(* The main function of the implementation *)
+
+Definition cooper (f : formula) : formula :=
+  let f := unity f in
+  let f_inf := minusinf f in
+  let bs := bset f in
+  let js := interval (divlcm f) in
+  let f_element := (fun j b => subst (add b (TConstant j)) f) in
+  let stage := (fun j =>
+    disjunction (subst (TConstant j) f_inf)
+                (big_disjunction (f_element j) bs)
+  ) in
+  shift (big_disjunction stage js).
+
+Lemma cooper_correct:
+  forall env f,
+  wff f ->
+  nnf f ->
+  interpret_formula env (FExists f) <->
+  interpret_formula env (cooper f).
+Proof.
+  intros.
+  rewrite~ interpret_unity. simpl.
+  unfold cooper.
+  rewrite interpret_shift with (x:=0) (* dummy *); cycle 1.
+  { apply all_big_disjunction. intros. apply all_disjunction.
+    - now apply wf1_subst, wf_minusinf, wf_unity.
+    - apply all_big_disjunction. intros. apply wf1_subst.
+      + apply~ wf_add. eapply wf1_In_bset;[|eassumption]. now apply wf_unity.
+      + now apply wf_unity. }
+
+  rewrite interpret_big_disjunction.
+  erewrite big_or_extens; cycle 1.
+  { intro. match goal with |- _ <-> ?x => set (toto := x) end.
+    rewrite interpret_disjunction.
+    subst toto. apply iff_refl. }
+  rewrite big_or_distr.
+
+  rewrite exists_equiv_sink_or_least_element.
+  assert (HH: forall (A B C D: Prop),
+             A <-> C ->
+             (B -> D) ->
+             (D -> A \/ B) ->
+             A \/ B <-> C \/ D) by tauto.
+  apply HH; clear HH.
+
+  { (* QE for the "sink" case. *)
+    rewrite sink_qe. rewrite interpret_big_disjunction. reflexivity.
+    apply~ normal_unity. }
+
+  { (* QE for the "least element" case (-> direction). *)
+    intros Hex. forwards~: least_element_qe Hex.
+    now apply normal_unity.
+    now apply nnf_unity.
+    rewrite <-interpret_big_disjunction. eassumption. }
+
+  { (* QE for the "least element" case (<- direction). *)
+    intros Hqe. rewrite <-exists_equiv_sink_or_least_element.
+    apply big_or_inv in Hqe. destruct Hqe as [j [? Hqe]].
+    rewrite interpret_big_disjunction in Hqe.
+    apply big_or_inv in Hqe. destruct Hqe as [b [? Hqe]].
+    rewrite interpret_subst, interpret_add in Hqe; eauto using wf_unity. }
+Qed.
+
+(* [cooper] preserves well-formedness and the negative normal form *)
+
+Lemma wf_cooper:
+  forall f,
+  wff f ->
+  wff (cooper f).
+Proof.
+  (* In theory this should be a single [eauto using] invocation, but it doesn't
+     work for some reason. *)
+  intros. unfold cooper.
+  apply wf_shift.
+  apply all_big_disjunction. intros.
+  apply all_disjunction. now eauto using wf1_subst, wf_minusinf, wf_unity.
+  apply all_big_disjunction. intros.
+  apply wf1_subst. now eauto using wf1_subst, wf_unity, wf_add, wf1_In_bset.
+  apply~ wf_unity.
+Qed.
+
+Lemma nnf_cooper:
+  forall f,
+  nnf f ->
+  nnf (cooper f).
+Proof.
+  intros. unfold cooper.
+  apply nnf_shift, nnf_big_disjunction. intros.
+  apply nnf_disjunction.
+  now apply nnf_subst, nnf_minusinf, nnf_unity.
+  apply nnf_big_disjunction. intros.
+  now apply nnf_subst, nnf_unity.
+Qed.
