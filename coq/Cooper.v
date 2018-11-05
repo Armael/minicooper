@@ -14,18 +14,6 @@ Open Scope list_scope.
 
 (* Arithmetic lemmas. *)
 
-Lemma Zmult_0_l_contrapositive:
-  forall m n, m * n <> 0 -> m <> 0.
-Proof.
-  repeat intro. subst. omega.
-Qed.
-
-Lemma Zmult_integral_contrapositive:
-  forall m n, m <> 0 -> n <> 0 -> m * n <> 0.
-Proof.
-  intros. intro. forwards*: Zmult_integral.
-Qed.
-
 Ltac Zabs_either :=
   match goal with |- context[Z.abs ?k] =>
     pattern (Z.abs k); eapply Zabs_intro; intros
@@ -67,152 +55,17 @@ Proof.
   rewrite Z_div_same_full; omega.
 Qed.
 
-Lemma Zabs_positive:
-  forall a,
-  a <> 0 ->
-  Z.abs a > 0.
-Proof.
-  intros.
-  destruct (@Ztrichotomy a 0) as [ | [ | ]].
-  rewrite Zabs_non_eq; omega.
-  false.
-  rewrite Z.abs_eq; omega.
-Qed.
-
-Lemma Zdivide_sign_insensitive:
-  forall d t,
-  (d | t) <-> (-d | t).
-Proof.
-  split; introv [ q ? ]; exists (-q); subst; ring.
-Qed.
-
-(* ------------------------------------------------------------------------- *)
-
-(* A few lemmas that exist in Coq 8.3 but not in 8.2. *)
-
-Lemma nat_compare_Lt_lt : forall n m, Nat.compare n m = Lt -> (n<m)%nat.
-Proof.
-  intros; apply <- nat_compare_lt; auto.
-Qed.
-
-Lemma nat_compare_Gt_gt : forall n m, Nat.compare n m = Gt -> (n>m)%nat.
-Proof.
-  intros; apply <- nat_compare_gt; auto.
-Qed.
-
-Lemma Zgcd_comm : forall a b, Z.gcd a b = Z.gcd b a.
-Proof.
-  intros.
-  apply Zis_gcd_gcd.
-  apply Zgcd_is_pos.
-  apply Zis_gcd_sym.
-  apply Zgcd_is_gcd.
-Qed.
-
-Lemma Z0_divide:
-  forall b,
-  (0 | b) ->
-  b = 0.
-Proof.
-  inversion 1 as [ ? h ]. ring_simplify in h. assumption.
-Qed.
-
-(* This one exists in 8.2 with the useless hypothesis [b > 0]. *)
-
-Lemma Zdivide_mod : forall a b, (b | a) -> a mod b = 0.
-Proof.
-  intros a b (c,->); apply Z_mod_mult.
-Qed.
-
-(* This one exists in 8.2 and 8.3 with the useless hypothesis [a > 0]. *)
-
-Theorem Zdivide_Zdiv_eq:
-  forall a b,
-  (a | b) ->
-  b = a * (b / a).
-Proof.
-  intros.
-  (* Distinguish two cases. *)
-  destruct (Z.eq_dec a 0).
-  (* Case: [a] is zero. Then, [b] is zero as well. *)
-  subst. forwards: Z0_divide. eassumption. subst. ring.
-  (* Case: [a] is nonzero. *)
-  pattern b at 1; erewrite Z_div_mod_eq_full; eauto.
-  erewrite Zdivide_mod; eauto.
-Qed.
-
-(* ------------------------------------------------------------------------- *)
-
-(* Definition and properties of the least common multiple (LCM) of two numbers. *)
-
-Definition Zlcm n1 n2 :=
-  (n1 * n2) / Z.gcd n1 n2.
-
-Lemma Zlcm_commutative:
-  forall n1 n2,
-  Zlcm n1 n2 = Zlcm n2 n1.
-Proof.
-  unfold Zlcm. intros. rewrite Zgcd_comm. f_equal. ring.
-Qed.
-
-Lemma divides_Zlcm_left_explicit:
-  forall n1 n2,
-  Zlcm n1 n2 = n1 * (n2 / Z.gcd n1 n2).
-Proof.
-  intros. unfold Zlcm.
-  (* [Z.gcd n1 n2] divides [n2]. Let [q2] be the quotient. *)
-  destruct (Zgcd_is_gcd n1 n2) as [ _ [ q2 hn2 ] _].
-  (* We must distinguish two cases, as [Z.gcd n1 n2] might be zero. *)
-  destruct (Z.eq_dec (Z.gcd n1 n2) 0) as [ ? | nz ].
-    (* Sub-case: [Z.gcd n1 n2] is zero. *)
-    (* Then, [n1] and [n2] are zero as well. Everything is zero. *)
-    forwards: Zgcd_inv_0_l. eassumption.
-    forwards: Zgcd_inv_0_r. eassumption.
-    subst. simpl. unfold Z.div; simpl.
-    reflexivity.
-    (* Sub-case: [Z.gcd n1 n2] is nonzero. *)
-    (* Eliminate [n2]. Abstract away. *)
-    generalize (Z.gcd n1 n2) hn2 nz. clear hn2. intros g ? ?. subst n2.
-    (* Simplify. *)
-    rewrite Z_div_mult_full; auto.
-    rewrite Zmult_assoc.
-    rewrite Z_div_mult_full; auto.
-Qed.
-
-Lemma divides_Zlcm_left:
-  forall n1 n2,
-  (n1 | Zlcm n1 n2).
-Proof.
-  intros. rewrite divides_Zlcm_left_explicit. eauto using Zdivide_factor_r.
-Qed.
-
-Lemma divides_Zlcm_right:
-  forall n1 n2,
-  (n2 | Zlcm n1 n2).
-Proof.
-  intros. rewrite Zlcm_commutative. apply divides_Zlcm_left.
-Qed.
-
-Lemma Zlcm_nonzero:
-  forall a b,
-  (* It would suffice for [a] or [b] to be nonzero. *)
-  a <> 0 ->
-  b <> 0 ->
-  Zlcm a b <> 0.
-Proof.
-  intros. unfold Zlcm.
-  eapply nonzero_quotient.
-    eauto using Zmult_integral_contrapositive.
-    intro. forwards: Zgcd_inv_0_l. eassumption. omega.
-    destruct (@Zgcd_is_gcd a b). eauto using Zdivide_mult_l.
-Qed.
-
-Lemma Zlcm_nonneg:
+Lemma Zlcm_pos:
   forall a b,
   0 < a ->
   0 < b ->
-  0 < Zlcm a b.
-Admitted.
+  0 < Z.lcm a b.
+Proof.
+  intros.
+  Search (Z.lcm _ _ = 0).
+  rewrite Z.le_neq. split. apply Z.lcm_nonneg.
+  intro HH. symmetry in HH. rewrite Z.lcm_eq_0 in HH. lia.
+Qed.
 
 (* ------------------------------------------------------------------------- *)
 
@@ -299,7 +152,7 @@ Lemma wf_mul_nonzero:
   wft x t ->
   wft x (mul_nonzero n t).
 Proof.
-  induction 2; simpl; econstructor; eauto using Zmult_integral_contrapositive.
+  induction 2; simpl; econstructor; eauto. nia.
 Qed.
 
 Lemma wf_mul:
@@ -1150,7 +1003,7 @@ Fixpoint formula_lcm (f : formula) : num :=
       1
   | FAnd f1 f2
   | FOr f1 f2 =>
-      Zlcm (formula_lcm f1) (formula_lcm f2)
+      Z.lcm (formula_lcm f1) (formula_lcm f2)
   | FNot f =>
       formula_lcm f
   end.
@@ -1199,9 +1052,9 @@ Proof.
   econstructor. unfold dvx.
   term; eauto. rewrite Z.divide_abs_r. reflexivity.
   (* Case: [FAnd]. *)
-  econstructor; eapply all_dvx_transitive; eauto using divides_Zlcm_left, divides_Zlcm_right.
+  econstructor; eapply all_dvx_transitive; eauto using Z.divide_lcm_l, Z.divide_lcm_r.
   (* Case: [FOr]. *)
-  econstructor; eapply all_dvx_transitive; eauto using divides_Zlcm_left, divides_Zlcm_right.
+  econstructor; eapply all_dvx_transitive; eauto using Z.divide_lcm_l, Z.divide_lcm_r.
   (* Case: [FNot]. *)
   econstructor; eauto.
 Qed.
@@ -1211,7 +1064,7 @@ Lemma formula_lcm_nonneg:
   wff f ->
   0 < formula_lcm f.
 Proof.
-  induction 1; simpl; eauto using Zlcm_nonneg with zarith.
+  induction 1; simpl; eauto using Zlcm_pos with zarith.
   (* Case: [FAtom]. *)
   term; wff; wft; wfp; lia.
 Qed.
@@ -1292,22 +1145,14 @@ Lemma scale_Eq_atom:
   k <> 0 ->
   t = k * u ->
   ( 0 = t <-> 0 = u ).
-Proof.
-  intros. split; intros; subst.
-  forwards: Zmult_integral. eauto. intuition eauto.
-  ring.
-Qed.
+Proof. intros. nia. Qed.
 
 Lemma scale_Lt_atom:
   forall k t u,
-  k > 0 ->
+  0 < k ->
   t = k * u ->
   ( 0 < t <-> 0 < u ).
-Proof.
-  intros. split; intros; subst.
-  eapply Zmult_gt_0_lt_0_reg_r. eassumption. rewrite Zmult_comm. assumption.
-  eapply Zmult_lt_0_compat; omega.
-Qed.
+Proof. intros; nia. Qed.
 
 Lemma scale_Dv_atom:
   forall k d1 d2 t1 t2,
@@ -1337,7 +1182,7 @@ Proof.
   (* Either [Z.abs k] is [-k], or it is [k]. *)
   intro k. Zabs_either.
   (* Sub-case: [-k]. *)
-  rewrite (@Zdivide_sign_insensitive d1). subst.
+  rewrite <-(Z.divide_opp_l d1). subst.
   eapply scale_Dv_atom; [ idtac | eauto | eauto ].
   ring.
   (* Sub-case: [k]. *)
@@ -1376,17 +1221,14 @@ Proof.
   (* Three interesting sub-cases remain. *)
 
   (* Sub-case: an equality atom where [x] occurs. *)
-  eapply (@scale_Eq_atom q). eauto using Zmult_0_l_contrapositive.
-  ring.
+  eapply (@scale_Eq_atom q); nia.
 
   (* Sub-case: an inequality atom where [x] occurs. *)
-  eapply (@scale_Lt_atom (Z.abs q)). eauto using Zabs_positive, Zmult_0_l_contrapositive.
+  eapply (@scale_Lt_atom (Z.abs q)). nia.
   ring_simplify. rewrite sign_multiply_is_Zabs; eauto. ring.
 
   (* Sub-case: a divisibility atom where [x] occurs. *)
-  eapply scale_Dv_atom_Zabs. eauto. eauto using Zmult_0_l_contrapositive.
-  ring.
-
+  eapply scale_Dv_atom_Zabs. eauto. nia. ring.
 Qed.
 
 Lemma interpret_adjust_formula_lcm:
@@ -1858,7 +1700,7 @@ Fixpoint divlcm (f : formula) : num :=
     d
   | FAnd f1 f2
   | FOr f1 f2 =>
-    Zlcm (divlcm f1) (divlcm f2)
+    Z.lcm (divlcm f1) (divlcm f2)
   | FNot f =>
     divlcm f
   | _ =>
@@ -1910,9 +1752,9 @@ Proof.
   (* Case: [FAtom]. *)
   { econstructor. unfold dvdvx. predicate; term; eauto using Z.divide_refl. }
   (* Case: [FAnd]. *)
-  { econstructor; eapply all_dvdvx_transitive; eauto using divides_Zlcm_left, divides_Zlcm_right. }
+  { econstructor; eapply all_dvdvx_transitive; eauto using Z.divide_lcm_l, Z.divide_lcm_r. }
   (* Case: [FOr]. *)
-  { econstructor; eapply all_dvdvx_transitive; eauto using divides_Zlcm_left, divides_Zlcm_right. }
+  { econstructor; eapply all_dvdvx_transitive; eauto using Z.divide_lcm_l, Z.divide_lcm_r. }
   (* Case: [FNot]. *)
   { econstructor; eauto. }
 Qed.
@@ -1922,7 +1764,7 @@ Lemma divlcm_nonneg:
   wff f ->
   0 < divlcm f.
 Proof.
-  induction 1; simpl; eauto using Zlcm_nonneg with zarith.
+  induction 1; simpl; eauto using Zlcm_pos with zarith.
   (* Case: [FAtom]. *)
   term; wff; wft; wfp; try omega.
 Qed.
