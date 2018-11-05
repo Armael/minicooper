@@ -67,6 +67,18 @@ Proof.
   intro HH. symmetry in HH. rewrite Z.lcm_eq_0 in HH. lia.
 Qed.
 
+Hint Constructors Forall.
+
+Lemma Forall_app : forall A P (l1 l2: list A),
+  Forall P l1 ->
+  Forall P l2 ->
+  Forall P (l1 ++ l2).
+Proof.
+  induction l1; intros; simpl in *; eauto.
+  match goal with h: Forall _ (_ :: _) |- _ => depelim h end.
+  auto.
+Qed.
+
 (* ------------------------------------------------------------------------- *)
 
 (* Our model is Z. *)
@@ -640,6 +652,8 @@ Qed.
 
 (* Smart constructors for conjunction, disjunction, and negation. *)
 
+(* Conjunction *)
+
 Definition conjunction f1 f2 :=
   match f1, f2 with
   | FFalse, _
@@ -678,6 +692,8 @@ Lemma nnf_conjunction:
 Proof.
   intros; destruct f1; destruct f2; simpl in *; eauto.
 Qed.
+
+(* Disjunction *)
 
 Definition disjunction f1 f2 :=
   match f1, f2 with
@@ -718,6 +734,8 @@ Proof.
   intros; destruct f1; destruct f2; simpl in *; eauto.
 Qed.
 
+(* Negation *)
+
 Definition negation f :=
   match f with
   | FTrue =>
@@ -747,6 +765,8 @@ Proof.
 Qed.
 
 Definition wf_negation := all_negation.
+
+(* Iterated disjunction, and iterated \/ *)
 
 (* TEMPORARY fold_left is probably more efficient, but fold_right has a nicer
    induction principle... *)
@@ -832,6 +852,8 @@ Proof.
   intros. rewrite interpret_big_disjunction. reflexivity.
 Qed.
 
+(* Intervals, to use as support for [big_disjunction] and [big_or]. *)
+
 (* Lemma interval_measure_decr : forall x, *)
 (*   0 < x -> *)
 (*   x <> 1 -> *)
@@ -853,13 +875,16 @@ Qed.
 (*   rewrite !Z2Nat.id by omega. omega. *)
 (* Qed. *)
 
-(* [0, n) *)
+(* The interval of 0 (included) to n (excluded): [0, n). *)
 
 Fixpoint interval' (n : nat) : list Z :=
   match n with
   | O => []
   | S n' => Z.of_nat n' :: interval' n'
   end.
+
+Definition interval (x : Z) : list Z :=
+  interval' (Z.to_nat x).
 
 Lemma In_interval' : forall x n,
   In x (interval' n) <-> 0 <= x < Z.of_nat n.
@@ -872,9 +897,6 @@ Proof.
       now branches; [ false | auto ].
     + rewrite IHn. lia.
 Qed.
-
-Definition interval (x : Z) : list Z :=
-  interval' (Z.to_nat x).
 
 Lemma In_interval : forall x n,
   In x (interval n) <-> 0 <= x < n.
@@ -1813,6 +1835,9 @@ Qed.
 
 (* ------------------------------------------------------------------------- *)
 
+(* If [P] is invariant by translation modulo [D], then [sink P] is equivalent to
+   a big disjunction (thus eliminating an existential quantifier). *)
+
 Lemma sink_invariant_modulo_equiv_exists:
   forall P : Z -> Prop,
   forall D : Z,
@@ -1926,6 +1951,9 @@ Qed.
 
 (* ------------------------------------------------------------------------- *)
 
+(* Shifting (down) all the de Bruijn variables of a term. This only makes sense
+   if the first variable does not appear in the term. *)
+
 Fixpoint shift_term (t : term) : term :=
   match t with
   | TSummand c (S n) u =>
@@ -1952,6 +1980,8 @@ Proof.
   wft. rewrite IHt. now destruct n.
   eapply wft_monotone; eauto with zarith.
 Qed.
+
+(* Same with a formula. *)
 
 Fixpoint shift (f : formula) : formula :=
   match f with
@@ -1994,6 +2024,8 @@ Qed.
 
 (* ------------------------------------------------------------------------- *)
 
+(* Quantifier elimination for formulas, in the "sink" case. *)
+
 Notation sink_interpret env f := (sink (fun x => interpret_formula (extend env x) f)).
 
 Notation sink_interpret_qe env f := (
@@ -2018,6 +2050,7 @@ Proof.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
+(* We now turn to the other case, where the set of solutions is bounded. *)
 
 (* Constructing the B-set. *)
 
@@ -2061,13 +2094,7 @@ Function bset (f : formula) : list term :=
     []
   end.
 
-Hint Constructors Forall.
-
-Lemma Forall_app : forall A P (l1 l2: list A),
-  Forall P l1 ->
-  Forall P l2 ->
-  Forall P (l1 ++ l2).
-Admitted.
+(* Terms in [bset f] do not contain the variable [x]. *)
 
 Lemma wf1_bset:
   forall f,
@@ -2182,6 +2209,8 @@ Qed.
 
 (* ------------------------------------------------------------------------- *)
 
+(* Quantifier elimination for formulas, in the "least element" case. *)
+
 Notation least_element_interpret env f :=
   (least_element (fun x => interpret_formula (extend env x) f)).
 
@@ -2195,7 +2224,7 @@ Notation least_element_interpret_qe env f := (
   )
 ).
 
-Lemma least_element_qe:
+Lemma least_element_qe_impl:
   forall env f u,
   all normal f ->
   nnf f ->
@@ -2211,21 +2240,25 @@ Proof.
     apply big_or_prove with b; auto.
     rewrite~ interpret_subst. rewrite interpret_add. simpl.
     rewrite Hx in Hf. apply Hf. }
-
-
-
-  (* { intros Hqe. rewrite interpret_big_disjunction2 in Hqe. *)
-  (*   apply big_or_inv in Hqe. destruct Hqe as [j [? Hqe]]. *)
-  (*   apply big_or_inv in Hqe. destruct Hqe as [b [? Hqe]]. *)
-  (*   rewrite interpret_subst, interpret_add in Hqe; auto. *)
-  (*   simpl in *. eexists. split. eassumption. *)
-  (*   intros. *)
 Qed.
 
+(* We do not actually need to prove the equivalence for the final theorem to
+   hold. For the reverse direction, we only need to prove this: *)
 
-
-
-
+Lemma least_element_qe_rev:
+  forall env f u,
+  all normal f ->
+  nnf f ->
+  least_element_interpret_qe (extend env u) f ->
+  exists x, interpret_formula (extend env x) f.
+Proof.
+  intros ? ? ? ? ? Hqe.
+  rewrite interpret_big_disjunction in Hqe.
+  apply big_or_inv in Hqe. destruct Hqe as [j [? Hqe]].
+  rewrite interpret_big_disjunction in Hqe.
+  apply big_or_inv in Hqe. destruct Hqe as [b [? Hqe]].
+  rewrite interpret_subst, interpret_add in Hqe; eauto using wf_unity.
+Qed.
 
 (* ------------------------------------------------------------------------- *)
 
@@ -2253,7 +2286,9 @@ Proof.
   intros.
   rewrite~ interpret_unity. simpl.
   unfold cooper.
-  rewrite interpret_shift with (x:=0) (* dummy *); cycle 1.
+  (* 0 is a dummy value, associated in the environment to variable [x],
+     which does not happen in the term. *)
+  rewrite interpret_shift with (x:=0); cycle 1.
   { apply all_big_disjunction. intros. apply all_disjunction.
     - now apply wf1_subst, wf_minusinf, wf_unity.
     - apply all_big_disjunction. intros. apply wf1_subst.
@@ -2280,17 +2315,13 @@ Proof.
     apply~ normal_unity. }
 
   { (* QE for the "least element" case (-> direction). *)
-    intros Hex. forwards~: least_element_qe Hex.
-    now apply normal_unity.
-    now apply nnf_unity.
-    rewrite <-interpret_big_disjunction. eassumption. }
+    rewrite <-interpret_big_disjunction.
+    apply least_element_qe_impl. now apply normal_unity. now apply nnf_unity. }
 
   { (* QE for the "least element" case (<- direction). *)
-    intros Hqe. rewrite <-exists_equiv_sink_or_least_element.
-    apply big_or_inv in Hqe. destruct Hqe as [j [? Hqe]].
-    rewrite interpret_big_disjunction in Hqe.
-    apply big_or_inv in Hqe. destruct Hqe as [b [? Hqe]].
-    rewrite interpret_subst, interpret_add in Hqe; eauto using wf_unity. }
+    rewrite <-interpret_big_disjunction.
+    rewrite <-exists_equiv_sink_or_least_element.
+    apply least_element_qe_rev. now apply normal_unity. now apply nnf_unity. }
 Qed.
 
 (* [cooper] preserves well-formedness and the negative normal form *)
@@ -2401,6 +2432,7 @@ Ltac wff_ue :=
   match goal with h: wff_ue _ |- _ => depelim h end.
 
 (* ------------------------------------------------------------------------- *)
+(* [qe f] is equivalent to [f], and does not contain quantifiers. *)
 
 Lemma all_map_disjuncts:
   forall transform f P,
@@ -2412,6 +2444,7 @@ Proof.
   all. apply~ all_disjunction.
 Qed.
 
+(* This entails that [qe f] is quantifier-free. *)
 Lemma wf_qe:
   forall f,
   wff_ue f ->
