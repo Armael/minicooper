@@ -2042,23 +2042,31 @@ Hint Constructors negated_ineq.
 
 (* Constructing the B-set. *)
 
+(* We slightly modify the boundary points returned by [bset] compared to the
+   description given e.g. in Harrison's book: in order to have [0 <= j < D]
+   instead of [1 <= j <= D] in [bset_correct] below, we have to add 1 to the
+   boundary points we return here.
+
+   Having intervals [0, n) instead of [1, n] makes the proofs easier...
+ *)
+
 Function bset (f : formula) : list term :=
   match f with
   | FNot (FAtom Eq (TSummand c 0 u)) =>
     (* [c] = 1 *)
     (* The atom is [0 <> x + u]. This changes from true to false when [x] is
-       [-u]. *)
-    [ neg u ]
+       [-u+1]. *)
+    [ add (neg u) (TConstant 1) ]
   | FAtom Eq (TSummand c 0 u) =>
     (* [c] = 1 *)
     (* The atom is [0 = x + u]. This changes from true to false when [x] is
-       [-u-1]. *)
-    [ neg (add u (TConstant 1)) ]
+       [-u]. *)
+    [ neg u ]
   | FAtom Lt (TSummand c 0 u) =>
     if Z.eqb c 1 then
       (* The atom is [0 < x + u]. This changes from true to false when [x] is
-         [-u]. *)
-      [ neg u ]
+         [-u+1]. *)
+      [ add (neg u) (TConstant 1) ]
     else
       (* [c] = -1 *)
       []
@@ -2091,7 +2099,7 @@ Proof.
   { predicate; term; wff; wft; simpl in *; try case_if;
       eauto using wf_neg, wf_add, wf_neg. }
   { destruct f; eauto. do 2 wff. predicate; term; eauto.
-    wft. eauto using wf_neg. }
+    wft. eauto using wf_add, wf_neg. }
 Qed.
 
 Lemma bset_correct:
@@ -2106,33 +2114,35 @@ Lemma bset_correct:
   exists b j,
     x = interpret_term (extend env u) b + j /\
     In b (bset f) /\
-    1 <= j <= D.
+    0 <= j < D.
 Proof.
   intros env f.
   functional induction (bset f); intros; simpl in *;
     repeat all; unfold normal in *; unpack.
   { (* Atom [0 <> x + u] *)
     subst c. rewrite Z.mul_1_l in *. classical.
-    exists (neg u). (* b = -u *)
-    exists D. (* j = D *)
-    rewrite interpret_neg. erewrite extend_insensitive with (n2:=x); eauto.
+    exists (add (neg u) (TConstant 1)). (* b = -u+1 *)
+    exists (D - 1). (* j = D-1 *)
+    rewrite interpret_add, interpret_neg. simpl.
+    erewrite extend_insensitive with (n2:=x); eauto.
     erewrite extend_insensitive with (n1:=x-D) (n2:=x) in *; eauto.
     eauto with zarith. }
   { (* Atom [0 = x + u] *)
     subst c. rewrite Z.mul_1_l in *.
-    exists (neg (add u (TConstant 1))). (* b = -u-1 *)
-    exists 1. (* j = 1 *)
+    exists (neg u). (* b = -u *)
+    exists 0. (* j = 0 *)
     erewrite extend_insensitive with (n2:=x); eauto using wf_neg, wf_add.
-    rewrite interpret_neg, interpret_add. simpl. eauto with zarith. }
+    rewrite interpret_neg. eauto with zarith. }
   { (* Atom [0 < x + u] *)
     rewrite Z.eqb_eq in *. subst c. rewrite Z.mul_1_l in *.
-    exists (neg u). (* b = -u *)
+    exists (add (neg u) (TConstant 1)). (* b = -u+1 *)
     rewrite <-Z.le_ngt in *.
     erewrite extend_insensitive with (n1:=x-D) (n2:=x) in *; eauto.
-    erewrite extend_insensitive with (n2:=x); eauto using wf_neg.
-    rewrite interpret_neg. set (u' := interpret_term (extend env x) u) in *.
+    erewrite extend_insensitive with (n2:=x); eauto using wf_add, wf_neg.
+    rewrite interpret_add, interpret_neg. simpl.
+    set (u' := interpret_term (extend env x) u) in *.
     assert (-u' + 1 <= x <= -u' + D) by lia.
-    exists (x + u'). (* j *) eauto with zarith. }
+    exists (x + u' - 1). (* j *) eauto with zarith. }
   { (* Atom [0 < - x + u] *)
     rewrite Z.eqb_neq in *. false.
     erewrite extend_insensitive with (n1:=x-D) (n2:=x) in *; eauto.
@@ -2176,7 +2186,7 @@ Lemma bset_correct_divlcm:
   exists b j,
     x = interpret_term (extend env u) b + j /\
     In b (bset f) /\
-    1 <= j <= divlcm f.
+    0 <= j < divlcm f.
 Proof.
   intros.
   apply~ bset_correct.
