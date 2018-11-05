@@ -767,6 +767,22 @@ Ltac classical :=
 
 (* ------------------------------------------------------------------------- *)
 
+Lemma qf_nnf:
+  forall f,
+  nnf f ->
+  qf f.
+Proof.
+  induction f; intros; simpl in *; nnf; eauto.
+Qed.
+
+Lemma qf_wff:
+  forall f,
+  wff f ->
+  qf f.
+Proof.
+  intros. eapply all_covariant; [|eassumption]. eauto.
+Qed.
+
 (* Smart constructors for conjunction, disjunction, and negation. *)
 
 Definition conjunction f1 f2 :=
@@ -788,14 +804,16 @@ Proof.
   intros. unfold conjunction. destruct f1; destruct f2; simpl; tauto.
 Qed.
 
-Lemma wf_conjunction:
-  forall f1 f2,
-  wff f1 ->
-  wff f2 ->
-  wff (conjunction f1 f2).
+Lemma all_conjunction:
+  forall f1 f2 P,
+  all P f1 ->
+  all P f2 ->
+  all P (conjunction f1 f2).
 Proof.
   intros; destruct f1; destruct f2; simpl in *; eauto.
 Qed.
+
+Definition wf_conjunction := all_conjunction.
 
 Lemma nnf_conjunction:
   forall f1 f2,
@@ -825,29 +843,22 @@ Proof.
   intros. unfold disjunction. destruct f1; destruct f2; simpl; tauto.
 Qed.
 
-Lemma wf_disjunction:
-  forall f1 f2,
-  wff f1 ->
-  wff f2 ->
-  wff (disjunction f1 f2).
+Lemma all_disjunction:
+  forall f1 f2 P,
+  all P f1 ->
+  all P f2 ->
+  all P (disjunction f1 f2).
 Proof.
   intros; destruct f1; destruct f2; simpl in *; eauto.
 Qed.
+
+Definition wf_disjunction := all_disjunction.
 
 Lemma nnf_disjunction:
   forall f1 f2,
   nnf f1 ->
   nnf f2 ->
   nnf (disjunction f1 f2).
-Proof.
-  intros; destruct f1; destruct f2; simpl in *; eauto.
-Qed.
-
-Lemma all_disjunction:
-  forall f1 f2 P,
-  all P f1 ->
-  all P f2 ->
-  all P (disjunction f1 f2).
 Proof.
   intros; destruct f1; destruct f2; simpl in *; eauto.
 Qed.
@@ -872,13 +883,15 @@ Proof.
   intros. unfold negation. destruct f; simpl; tauto.
 Qed.
 
-Lemma wf_negation:
-  forall f,
-  wff f ->
-  wff (negation f).
+Lemma all_negation:
+  forall f P,
+  all P f ->
+  all P (negation f).
 Proof.
-  intros; destruct f; simpl in *; wff; eauto.
+  intros; destruct f; simpl in *; all; eauto.
 Qed.
+
+Definition wf_negation := all_negation.
 
 (* TEMPORARY fold_left is probably more efficient, but fold_right has a nicer
    induction principle... *)
@@ -1094,6 +1107,20 @@ Proof.
   induction f; intros; simpl; try all; eauto.
   (* Proof of the second lemma. *)
   induction f; intros; try predicate; simpl; try all; eauto.
+Qed.
+
+Lemma wf_posnnf:
+  forall f,
+  wff f ->
+  wff (posnnf f)
+with wf_negnnf:
+  forall f,
+  wff f ->
+  wff (negnnf f).
+Proof.
+  induction f; intros; simpl; try all; eauto.
+  induction f; intros; try predicate; simpl; try all;
+    unpack; eauto using wf_sub.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
@@ -2372,12 +2399,12 @@ Definition cooper (f : formula) : formula :=
   ) in
   shift (big_disjunction stage js).
 
-Lemma cooper_correct:
+Lemma interpret_cooper:
   forall env f,
   wff f ->
   nnf f ->
-  interpret_formula env (FExists f) <->
-  interpret_formula env (cooper f).
+  interpret_formula env (cooper f) <->
+  interpret_formula env (FExists f).
 Proof.
   intros.
   rewrite~ interpret_unity. simpl.
@@ -2399,8 +2426,8 @@ Proof.
   rewrite exists_equiv_sink_or_least_element.
   assert (HH: forall (A B C D: Prop),
              A <-> C ->
-             (B -> D) ->
-             (D -> A \/ B) ->
+             (D -> B) ->
+             (B -> C \/ D) ->
              A \/ B <-> C \/ D) by tauto.
   apply HH; clear HH.
 
@@ -2429,8 +2456,8 @@ Lemma wf_cooper:
   wff f ->
   wff (cooper f).
 Proof.
-  (* In theory this should be a single [eauto using] invocation, but it doesn't
-     work for some reason. *)
+  (* In theory this proof could be a single [eauto using] invocation, but it
+     doesn't work for some reason. *)
   intros. unfold cooper.
   apply wf_shift.
   apply all_big_disjunction. intros.
@@ -2451,4 +2478,153 @@ Proof.
   now apply nnf_subst, nnf_minusinf, nnf_unity.
   apply nnf_big_disjunction. intros.
   now apply nnf_subst, nnf_unity.
+Qed.
+
+(* ------------------------------------------------------------------------- *)
+
+(* The main quantifier elimination algorithm: [qe] turns a formula into an
+   equivalent quantifier-free formula. *)
+
+Function map_disjuncts (transform : formula -> formula) (f : formula) :=
+  match f with
+  | FOr f1 f2 =>
+    disjunction (transform f1) (transform f2)
+  | FFalse =>
+    FFalse
+  | _ =>
+    transform f
+  end.
+
+Fixpoint qe (f : formula) : formula :=
+  match f with
+  | FAtom _ _ | FFalse | FTrue =>
+    f
+  | FAnd f1 f2 =>
+    conjunction (qe f1) (qe f2)
+  | FOr f1 f2 =>
+    disjunction (qe f1) (qe f2)
+  | FNot f =>
+    negation (qe f)
+  | FExists f =>
+    (* Innermost quantifiers are eliminated first. *)
+    let f := qe f in
+    (* Bring the body into NNF. *)
+    (* TEMPORARY: [cooper] preserves NNF. Could we do this just once as the
+       beginning? *)
+    let f := posnnf f in
+    (* An existential quantifier can be pushed into a disjunction, so each
+    toplevel disjunct can be treated independently. Over each disjunct, apply
+    [cooper] to eliminate the existential quantifier. *)
+    map_disjuncts cooper f
+  end.
+
+(* ------------------------------------------------------------------------- *)
+
+(* Like [all], but also under exists. *)
+Inductive all_under_ex (P : predicate -> term -> Prop) : formula -> Prop :=
+| all_under_ex_FAtom:
+    forall p t,
+    P p t ->
+    all_under_ex P (FAtom p t)
+| all_under_ex_FFalse:
+    all_under_ex P FFalse
+| all_under_ex_FTrue:
+    all_under_ex P FTrue
+| all_under_ex_FAnd:
+    forall f1 f2,
+    all_under_ex P f1 ->
+    all_under_ex P f2 ->
+    all_under_ex P (FAnd f1 f2)
+| all_under_ex_FOr:
+    forall f1 f2,
+    all_under_ex P f1 ->
+    all_under_ex P f2 ->
+    all_under_ex P (FOr f1 f2)
+| all_under_ex_FNot:
+    forall f,
+    all_under_ex P f ->
+    all_under_ex P (FNot f)
+| all_under_ex_FExists:
+    forall f,
+    all_under_ex P f ->
+    all_under_ex P (FExists f).
+
+Hint Constructors all_under_ex.
+
+Notation wff_ue f := (all_under_ex (fun p t => wft 0 t /\ wfp p) f).
+
+Ltac wff_ue :=
+  match goal with h: wff_ue _ |- _ => depelim h end.
+
+(* ------------------------------------------------------------------------- *)
+
+Lemma all_map_disjuncts:
+  forall transform f P,
+  all P f ->
+  (forall x, all P x -> all P (transform x)) ->
+  all P (map_disjuncts transform f).
+Proof.
+  intros. destruct f; simpl; eauto.
+  all. apply~ all_disjunction.
+Qed.
+
+Lemma nnf_map_disjuncts:
+  forall transform f,
+  nnf f ->
+  (forall x, nnf x -> nnf (transform x)) ->
+  nnf (map_disjuncts transform f).
+Proof.
+  intros. destruct f; simpl; eauto.
+  nnf. apply~ nnf_disjunction.
+Qed.
+
+Lemma qf_qe:
+  forall f,
+  qf (qe f).
+Proof.
+  induction f; intros; simpl in *;
+    eauto using wf_conjunction, wf_disjunction, wf_negation.
+  apply qf_nnf.
+  apply nnf_map_disjuncts. now apply nnf_posnnf.
+  eauto using nnf_cooper.
+Qed.
+
+Lemma wf_qe:
+  forall f,
+  wff_ue f ->
+  wff (qe f).
+Proof.
+  induction f; intros; simpl in *; wff_ue;
+    eauto using wf_conjunction, wf_disjunction, wf_negation.
+  apply all_map_disjuncts; eauto using wf_posnnf, wf_cooper.
+Qed.
+
+Lemma interpret_qe:
+  forall f env,
+  wff_ue f ->
+  interpret_formula env (qe f) <-> interpret_formula env f.
+Proof.
+  induction f; intros; wff_ue; simpl in * |-; try tauto;
+  [ repeat match goal with
+      h: forall e:environment, _ |- _ => specializes h env
+    end; simpl
+  .. | ].
+  rewrite interpret_conjunction; tauto.
+  rewrite interpret_disjunction; tauto.
+  rewrite interpret_negation; tauto.
+
+  (* FExists case *)
+  cbn [qe].
+  assert (wff (posnnf (qe f))). now apply wf_posnnf, wf_qe.
+  assert (nnf (posnnf (qe f))). now apply nnf_posnnf, qf_qe.
+  transitivity (interpret_formula env (cooper (posnnf (qe f)))); cycle 1.
+  { rewrite~ interpret_cooper. simpl. apply exists_equivalence.
+    intro. rewrite~ interpret_posnnf. }
+
+  functional induction (map_disjuncts cooper (posnnf (qe f))); try tauto;[].
+  rewrite interpret_disjunction. wff. nnf.
+  rewrite !interpret_cooper by auto.
+  simpl. split.
+  { intros HH. destruct HH as [[x ?]|[x ?]]; exists x; tauto. }
+  { intros HH. destruct HH as [x [?|?]]; [left|right]; exists x; tauto. }
 Qed.
