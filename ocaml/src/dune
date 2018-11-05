@@ -1,0 +1,3 @@
+(executable
+  (name cooper_test)
+  (libraries cooper))

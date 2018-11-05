@@ -1,0 +1,7 @@
+.merlin
+*.aux
+*.vo
+*.glob
+.lia.cache
+.nia.cache
+_build
