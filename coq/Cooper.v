@@ -1903,12 +1903,14 @@ Fixpoint subst (t : term) (f : formula) : formula :=
 Lemma interpret_subst:
   forall env f t u,
   wff f ->
-  interpret_formula (extend env u) (subst t f) <-> interpret_formula (extend env (interpret_term (extend env u) t)) f.
+  interpret_formula (extend env u) (subst t f) <->
+  interpret_formula (extend env (interpret_term (extend env u) t)) f.
 Proof.
   induction 1; simpl; try tauto.
   term; wff; wft; simpl in *.
   rewrite interpret_add, interpret_mul.
-  erewrite extend_insensitive with (n1:=interpret_term (extend env u) t) (n2:=u) by eauto.
+  erewrite extend_insensitive with (n1:=interpret_term (extend env u) t) (n2:=u)
+    by eauto.
   tauto.
   erewrite extend_insensitive. reflexivity. eauto. eauto.
   tauto.
