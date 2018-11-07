@@ -61,9 +61,7 @@ Lemma Zlcm_pos:
   0 < b ->
   0 < Z.lcm a b.
 Proof.
-  intros.
-  Search (Z.lcm _ _ = 0).
-  rewrite Z.le_neq. split. apply Z.lcm_nonneg.
+  intros. rewrite Z.le_neq. split. apply Z.lcm_nonneg.
   intro HH. symmetry in HH. rewrite Z.lcm_eq_0 in HH. lia.
 Qed.
 
@@ -2486,3 +2484,5 @@ Proof.
   { intros HH. destruct HH as [[x ?]|[x ?]]; exists x; tauto. }
   { intros HH. destruct HH as [x [?|?]]; [left|right]; exists x; tauto. }
 Qed.
+
+(* ------------------------------------------------------------------------- *)
