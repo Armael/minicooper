@@ -372,7 +372,7 @@ module Make (Num : Num) = struct
 	       [x] is [-u-1]. *)
 	    [ neg (add u (TConstant ANum.one)) ]
     | FAtom (Lt, TSummand (c, 0, u)) ->
-	    assert (c == one); (* FIXME bug?! [c] could also be -1? *)
+	    assert (c == one); (* BUG ! [c] could also be -1 (see the Coq implem) *)
 	    (* The atom is [0 < x + u]. This changes from true to false when
 	       [x] is [-u]. *)
 	    [ neg u ]
