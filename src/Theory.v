@@ -3,7 +3,7 @@ Require Import ZArith Psatz.
 Open Scope Z_scope.
 Require Import Znumtheory.
 Require Import Classical.
-Require Import MyTactics.
+Require Import MiniCooper.MyTactics.
 Require Import FunInd Recdef.
 Require Import List.
 Import ListNotations.

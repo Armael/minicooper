@@ -2,14 +2,14 @@ Set Implicit Arguments.
 Require Import ZArith Psatz.
 Open Scope Z_scope.
 Require Import Znumtheory.
-Require Import MyTactics.
+Require Import MiniCooper.MyTactics.
 Require Import FunInd Recdef.
 Require Import List Sorting Permutation.
 Import ListNotations.
 Open Scope Z_scope.
 Open Scope list_scope.
 
-Require Import Cooper.
+Require Import MiniCooper.Theory.
 
 Notation ground := num (only parsing).
 
