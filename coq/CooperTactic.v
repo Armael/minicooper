@@ -559,3 +559,191 @@ Proof.
 Qed.
 
 Hint Rewrite interpret_raw_formula_to_formula : interp.
+
+(* ------------------------------------------------------------------------- *)
+(* At the moment, we do not prove that this code produces well-formed terms and
+   formulas. Instead we write a checker. *)
+
+Fixpoint check_wft (n : nat) (t : term) : bool :=
+  match t with
+  | TSummand k n' u =>
+    negb (Z.eqb k 0) &&
+    Nat.leb n n' &&
+    check_wft (S n') u
+  | TConstant _ =>
+    true
+  end.
+
+Definition check_wfp (p : predicate) : bool :=
+  match p with
+  | Dv c =>
+    Z.ltb 0 c
+  | _ =>
+    true
+  end.
+
+Fixpoint check_wff (f : formula) : bool :=
+  match f with
+  | FAtom p t =>
+    check_wft 0 t && check_wfp p
+  | FFalse | FTrue =>
+    true
+  | FAnd f1 f2 | FOr f1 f2 =>
+    check_wff f1 && check_wff f2
+  | FNot f | FExists f=>
+    check_wff f
+  end.
+
+Lemma check_wft_correct:
+  forall t n,
+  check_wft n t = true ->
+  wft n t.
+Proof.
+  induction t; intros; simpl in *; eauto.
+  rewrite !Bool.andb_true_iff in *. unpack.
+  rewrite Bool.negb_true_iff, Z.eqb_neq, Nat.leb_le in *. eauto.
+Qed.
+
+Lemma check_wfp_correct:
+  forall p,
+  check_wfp p = true ->
+  wfp p.
+Proof.
+  destruct p; simpl in *; intros; try rewrite Z.ltb_lt in *; eauto.
+Qed.
+
+Lemma check_wff_correct:
+  forall f,
+  check_wff f = true ->
+  wff_ue f.
+Proof.
+  induction f; intros; simpl in *;
+    try rewrite Bool.andb_true_iff in *; unpack;
+      eauto using check_wft_correct, check_wfp_correct.
+Qed.
+
+(* ------------------------------------------------------------------------- *)
+
+Definition empty_env : environment := (fun (n:nat) => 0).
+
+Lemma cooper_qe_theorem (f : raw_formula) :
+  let f' := raw_formula_to_formula f in
+  check_wff f' = true ->
+  interpret_formula empty_env (qe f') ->
+  interpret_raw_formula empty_env f.
+Proof.
+  simpl; intros. rewrite interpret_qe in *; interp; auto.
+  apply~ check_wff_correct.
+Qed.
+
+(* ------------------------------------------------------------------------- *)
+
+Require Import Template.All.
+
+Ltac reflect_term term cont :=
+  lazymatch term with
+  | tApp (tConst "Coq.ZArith.BinIntDef.Z.add" []) [?x; ?y] =>
+    reflect_term x ltac:(fun t1 =>
+    reflect_term y ltac:(fun t2 =>
+    cont (RAdd t1 t2)))
+  | tApp (tConst "Coq.ZArith.BinIntDef.Z.sub" []) [?x; ?y] =>
+    reflect_term x ltac:(fun t1 =>
+    reflect_term y ltac:(fun t2 =>
+    cont (RSub t1 t2)))
+  | tApp (tConst "Coq.ZArith.BinIntDef.Z.mul" []) [?x; tRel ?v] =>
+    (* TODO: check that x is ground *)
+    denote_term x ltac:(fun k =>
+    cont (RMul k v))
+  | tApp (tConst "Coq.ZArith.BinIntDef.Z.mul" []) [tRel ?v; ?x] =>
+    (* TODO: check that x is ground *)
+    denote_term x ltac:(fun k =>
+    cont (RMul k v))
+  | tApp (tConst "Coq.ZArith.BinIntDef.Z.opp" []) [?x] =>
+    reflect_term x ltac:(fun t =>
+    cont (ROpp t))
+  | tRel ?n =>
+    cont (RVar n)
+  | ?x =>
+    denote_term x ltac:(fun c => cont (RConstant c))
+  end.
+
+Ltac reflect_predicate term cont :=
+  lazymatch term with
+  | tApp (tInd {| inductive_mind := "Coq.Init.Logic.eq"; inductive_ind := 0 |} [])
+      [tInd {| inductive_mind := "Coq.Numbers.BinNums.Z"; inductive_ind := 0 |} [];
+       ?x; ?y] =>
+    reflect_term x ltac:(fun t1 =>
+    reflect_term y ltac:(fun t2 =>
+    cont (RPred2 REq t1 t2)))
+  | tApp (tConst "Coq.ZArith.BinInt.Z.lt" []) [?x; ?y] =>
+    reflect_term x ltac:(fun t1 =>
+    reflect_term y ltac:(fun t2 =>
+    cont (RPred2 RLt t1 t2)))
+  | tApp (tConst "Coq.ZArith.BinInt.Z.le" []) [?x; ?y] =>
+    reflect_term x ltac:(fun t1 =>
+    reflect_term y ltac:(fun t2 =>
+    cont (RPred2 RLe t1 t2)))
+  | tApp (tConst "Coq.ZArith.BinInt.Z.gt" []) [?x; ?y] =>
+    reflect_term x ltac:(fun t1 =>
+    reflect_term y ltac:(fun t2 =>
+    cont (RPred2 RGt t1 t2)))
+  | tApp (tConst "Coq.ZArith.BinInt.Z.ge" []) [?x; ?y] =>
+    reflect_term x ltac:(fun t1 =>
+    reflect_term y ltac:(fun t2 =>
+    cont (RPred2 RGe t1 t2)))
+  | tApp (tConst "Coq.ZArith.BinInt.Z.divide" []) [?x; ?y] =>
+    (* TODO: check that x is ground *)
+    denote_term x ltac:(fun c =>
+    reflect_term y ltac:(fun t =>
+    cont (RPred1 (RDv c) t)))
+  end.
+
+Ltac reflect_formula term cont :=
+  lazymatch term with
+  | tInd {| inductive_mind := "Coq.Init.Logic.False"; inductive_ind := 0 |} [] =>
+    cont RFalse
+  | tInd {| inductive_mind := "Coq.Init.Logic.True"; inductive_ind := 0 |} [] =>
+    cont RTrue
+  | tApp (tInd {| inductive_mind := "Coq.Init.Logic.and"; inductive_ind := 0 |} [])
+         [?P; ?Q] =>
+    reflect_formula P ltac:(fun f1 =>
+    reflect_formula Q ltac:(fun f2 =>
+    cont (RAnd f1 f2)))
+  | tApp (tInd {| inductive_mind := "Coq.Init.Logic.or"; inductive_ind := 0 |} [])
+         [?P; ?Q] =>
+    reflect_formula P ltac:(fun f1 =>
+    reflect_formula Q ltac:(fun f2 =>
+    cont (ROr f1 f2)))
+  | tApp (tInd {| inductive_mind := "Coq.Init.Logic.not"; inductive_ind := 0 |} [])
+         [?P] =>
+    reflect_formula P ltac:(fun f =>
+    cont (RNot f))
+  | tApp (tInd {| inductive_mind := "Coq.Init.Logic.ex"; inductive_ind := 0 |} [])
+         [tInd {| inductive_mind := "Coq.Numbers.BinNums.Z"; inductive_ind := 0 |} [];
+          tLambda _ _ ?body] =>
+    reflect_formula body ltac:(fun f =>
+    cont (RExists f))
+  | ?f =>
+    reflect_predicate f ltac:(fun p =>
+    cont (RAtom p))
+  end.
+
+Ltac qe :=
+  match goal with |- ?X => quote_term X ltac:(fun tm =>
+    reflect_formula tm ltac:(fun f =>
+      apply (@cooper_qe_theorem f); [
+        reflexivity
+      |
+      (* cbv -[Z.add Z.sub Z.opp Z.mul Z.le Z.ge Z.gt Z.lt Z.divide] *)
+      (* Does not work because we need to compute with eg Z.mul.
+         TODO: introduce aliases for the blacklist *)
+      (* TODO: use cbv instead of simpl which seems to be much faster *)
+        simpl
+      ]
+    )
+  ) end.
+
+Goal exists x, 0 <= 2 * x + 5 \/ x > 3.
+  Fail lia.
+  qe. lia.
+Qed.
