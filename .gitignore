@@ -5,3 +5,6 @@
 .lia.cache
 .nia.cache
 _build
+.coqdeps.d
+Makefile.coq
+Makefile.coq.conf
