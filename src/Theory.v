@@ -1,14 +1,14 @@
 Set Implicit Arguments.
 Require Import ZArith Psatz.
-Open Scope Z_scope.
 Require Import Znumtheory.
 Require Import Classical.
 Require Import FunInd Recdef.
 Require Import List.
 Import ListNotations.
-Open Scope list_scope.
-
 Require Import MiniCooper.MyTactics.
+Open Scope list_scope.
+Open Scope Z_scope.
+
 
 (* ------------------------------------------------------------------------- *)
 
