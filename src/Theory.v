@@ -3,12 +3,12 @@ Require Import ZArith Psatz.
 Open Scope Z_scope.
 Require Import Znumtheory.
 Require Import Classical.
-Require Import MiniCooper.MyTactics.
 Require Import FunInd Recdef.
 Require Import List.
 Import ListNotations.
-Open Scope Z_scope.
 Open Scope list_scope.
+
+Require Import MiniCooper.MyTactics.
 
 (* ------------------------------------------------------------------------- *)
 
@@ -279,7 +279,8 @@ Qed.
 
 Lemma interpret_add:
   forall env t1 t2,
-  interpret_term env (add t1 t2) = interpret_term env t1 + interpret_term env t2.
+  interpret_term env (add t1 t2) =
+  interpret_term env t1 + interpret_term env t2.
 Proof.
   induction t1 as [ k1 x1 u1 | k1 ];
   induction t2 as [ k2 x2 u2 | k2 ];
@@ -290,8 +291,9 @@ Proof.
     forwards: nat_compare_eq. eassumption. subst x1.
     destruct (Z.eq_dec (k1 + k2) 0) as [ k1k2 | ].
       (* Sub-sub-case k1 + k2 = 0. *)
-      match goal with |- ?lhs = _ => assert (eq: lhs = lhs + (k1 + k2) * env x2) end. rewrite k1k2. ring. rewrite eq; clear eq.
-      rewrite IHu1. ring.
+      match goal with |- ?lhs = _ =>
+        assert (lhs = lhs + (k1 + k2) * env x2) as -> end.
+      now rewrite k1k2; ring. rewrite IHu1. ring.
       (* Sub-sub-sub k1 + k2 <> 0. *)
       simpl. rewrite IHu1. ring.
     (* Sub-case x1 < x2. *)
@@ -324,7 +326,8 @@ Qed.
 
 Lemma interpret_sub:
   forall env t1 t2,
-  interpret_term env (sub t1 t2) = interpret_term env t1 - interpret_term env t2.
+  interpret_term env (sub t1 t2) =
+  interpret_term env t1 - interpret_term env t2.
 Proof.
   intros. unfold sub. rewrite interpret_add. rewrite interpret_neg. ring.
 Qed.
@@ -666,7 +669,8 @@ Definition conjunction f1 f2 :=
 
 Lemma interpret_conjunction:
   forall env f1 f2,
-  interpret_formula env (conjunction f1 f2) <-> interpret_formula env f1 /\ interpret_formula env f2.
+  interpret_formula env (conjunction f1 f2) <->
+  interpret_formula env f1 /\ interpret_formula env f2.
 Proof.
   intros. unfold conjunction. destruct f1; destruct f2; simpl; tauto.
 Qed.
@@ -707,7 +711,8 @@ Definition disjunction f1 f2 :=
 
 Lemma interpret_disjunction:
   forall env f1 f2,
-  interpret_formula env (disjunction f1 f2) <-> interpret_formula env f1 \/ interpret_formula env f2.
+  interpret_formula env (disjunction f1 f2) <->
+  interpret_formula env f1 \/ interpret_formula env f2.
 Proof.
   intros. unfold disjunction. destruct f1; destruct f2; simpl; tauto.
 Qed.
@@ -843,7 +848,8 @@ Qed.
 (* Or we could setup rewriting under [big_or]... *)
 Lemma interpret_big_disjunction2:
   forall A B env (F : A -> B -> formula) l1 l2,
-  interpret_formula env (big_disjunction (fun x => big_disjunction (F x) l1) l2) <->
+  interpret_formula env
+    (big_disjunction (fun x => big_disjunction (F x) l1) l2) <->
   big_or (fun x => big_or (fun y => interpret_formula env (F x y)) l1) l2.
 Proof.
   intros. rewrite interpret_big_disjunction. apply big_or_extens.
@@ -851,27 +857,6 @@ Proof.
 Qed.
 
 (* Intervals, to use as support for [big_disjunction] and [big_or]. *)
-
-(* Lemma interval_measure_decr : forall x, *)
-(*   0 < x -> *)
-(*   x <> 1 -> *)
-(*   0 < x - 1. *)
-(* Proof. intros; omega. Qed. *)
-
-(* Function interval (x : Z) (Hx: 0 < x) *)
-(*          { measure Z.to_nat x } *)
-(* : list Z *)
-(* := *)
-(*   match Z.eq_dec x 1 with *)
-(*   | left _ => [] *)
-(*   | right Hneq => *)
-(*     let x' := x - 1 in *)
-(*     x' :: interval (interval_measure_decr Hx Hneq) *)
-(*   end. *)
-(* Proof. *)
-(*   intros. rewrite Nat2Z.inj_lt. *)
-(*   rewrite !Z2Nat.id by omega. omega. *)
-(* Qed. *)
 
 (* The interval of 0 (included) to n (excluded): [0, n). *)
 
@@ -1072,9 +1057,11 @@ Proof.
   econstructor. unfold dvx.
   term; eauto. rewrite Z.divide_abs_r. reflexivity.
   (* Case: [FAnd]. *)
-  econstructor; eapply all_dvx_transitive; eauto using Z.divide_lcm_l, Z.divide_lcm_r.
+  econstructor; eapply all_dvx_transitive;
+    eauto using Z.divide_lcm_l, Z.divide_lcm_r.
   (* Case: [FOr]. *)
-  econstructor; eapply all_dvx_transitive; eauto using Z.divide_lcm_l, Z.divide_lcm_r.
+  econstructor; eapply all_dvx_transitive;
+    eauto using Z.divide_lcm_l, Z.divide_lcm_r.
   (* Case: [FNot]. *)
   econstructor; eauto.
 Qed.
@@ -1184,8 +1171,9 @@ Proof.
   intros. split; introv h; subst.
   (* Left to right. *)
   destruct h as [ q h ]. exists q.
-  assert (i: t2 * k = (q * d2) * k). rewrite Zmult_comm. rewrite h. ring. clear h.
-  rewrite <- (@Z_div_mult_full t2 k); eauto.
+  assert (i: t2 * k = (q * d2) * k).
+  { rewrite Zmult_comm. rewrite h. ring. }
+  clear h. rewrite <- (@Z_div_mult_full t2 k); eauto.
   rewrite i.
   rewrite Z_div_mult_full; eauto.
   (* Right to left. *)
@@ -1222,7 +1210,7 @@ Lemma interpret_adjust:
   forall env f,
   all (dvx l) f ->
   wff f ->
-  ( interpret_formula (adjust_env l env) (adjust l f) <-> interpret_formula env f ).
+  interpret_formula (adjust_env l env) (adjust l f) <-> interpret_formula env f.
 Proof.
   (* All cases but [FAtom] are trivial. *)
   induction 2; intros; all; simpl; try tauto.
@@ -1255,7 +1243,9 @@ Lemma interpret_adjust_formula_lcm:
   forall f,
   wff f ->
   forall env,
-  ( interpret_formula (adjust_env (formula_lcm f) env) (adjust (formula_lcm f) f) <-> interpret_formula env f ).
+  interpret_formula (adjust_env (formula_lcm f) env)
+    (adjust (formula_lcm f) f) <->
+  interpret_formula env f.
 Proof.
   intros.
   eapply interpret_adjust.
@@ -1315,7 +1305,8 @@ Lemma normal_adjust:
 Proof.
   induction 2; intros; all; simpl; eauto.
   (* Case [FAtom]. *)
-  predicate; term; unfold dvx in *; wff; wft; wfp; econstructor; simpl; unfold normal; intuition eauto using wf_mul.
+  predicate; term; unfold dvx in *; wff; wft; wfp; econstructor; simpl;
+    unfold normal; intuition eauto using wf_mul.
   (* Only the sub-case of [Lt] atoms is slightly non-trivial. *)
   { Zabs_either.
     left.
@@ -1385,7 +1376,8 @@ Proof. firstorder. Qed.
 Lemma interpret_unity:
   forall env f,
   wff f ->
-  ( interpret_formula env (FExists f) <-> interpret_formula env (FExists (unity f)) ).
+  interpret_formula env (FExists f) <->
+  interpret_formula env (FExists (unity f)).
 Proof.
   intros. unfold unity. simpl.
   destruct (Z.eq_dec (formula_lcm f) 1) as [ eq | _ ].
@@ -1503,7 +1495,8 @@ Proof.
   (* [x] satisfies [P], so it cannot be below [floor]. *)
   assert (~ x < floor). specializes hfloor x. tauto.
   (* Either [x] is the least element of [P], or there is another solution of [P]
-     between [floor] and [x]. Let us refer to it as [sx], for ``a smaller [x]''. *)
+     between [floor] and [x]. Let us refer to it as [sx], for ``a smaller [x]''.
+  *)
   destruct (classic (forall y, y < x -> ~ P y)) as [ | hsx ].
   solve [ eauto ].
   generalize (not_all_ex_not _ _ hsx); clear hsx; intros [ sx hsx ].
@@ -1623,7 +1616,8 @@ Lemma interpret_minusinf:
   all normal f ->
   exists y,
   forall x, x < y ->
-  ( interpret_formula (extend env x) f <-> interpret_formula (extend env x) (minusinf f) ).
+  interpret_formula (extend env x) f <->
+  interpret_formula (extend env x) (minusinf f).
 Proof.
   induction 1; simpl; try solve [ exists 0; tauto ].
   (* Case [FAtom]. *)
@@ -1634,15 +1628,15 @@ Proof.
   (* Sub-case: an atom [0 = x + t]. This equality cannot be satisfied
      as [x] tends towards minus infinity. *)
   exists (- interpret_term (extend env 0) t). intros.
-  erewrite extend_insensitive with (n2 := 0). intuition omega. eassumption. omega.
+  erewrite extend_insensitive with (n2 := 0). lia. eassumption. lia.
   (* Sub-case: an atom [0 < -x + t]. This equality is satisfied
      as [x] tends towards minus infinity. *)
   exists (interpret_term (extend env 0) t). intros.
-  erewrite extend_insensitive with (n2 := 0). intuition omega. eassumption. omega.
+  erewrite extend_insensitive with (n2 := 0). lia. eassumption. lia.
   (* Sub-case: an atom [0 < x + t]. This equality cannot be satisfied
      as [x] tends towards minus infinity. *)
   exists (- interpret_term (extend env 0) t). intros.
-  erewrite extend_insensitive with (n2 := 0). intuition omega. eassumption. omega.
+  erewrite extend_insensitive with (n2 := 0). lia. eassumption. lia.
   (* Case [FAnd]. *)
   destruct IHall1 as [ y1 ih1 ].
   destruct IHall2 as [ y2 ih2 ].
@@ -1706,7 +1700,8 @@ Proof.
   split.
   { intros H x. forwards H': H (Z.min x y0). destruct H' as [y' [? ?]].
     exists y'. rewrite <-Hy0 by lia. split~. lia. }
-  { intros H x. forwards H': H (Z.min x y0). destruct H' as [y' [? ?]]. exists y'. rewrite Hy0 by lia. split~. lia. }
+  { intros H x. forwards H': H (Z.min x y0). destruct H' as [y' [? ?]].
+    exists  y'. rewrite Hy0 by lia. split~. lia. }
 Qed.
 
 (* ------------------------------------------------------------------------- *)
@@ -1772,9 +1767,11 @@ Proof.
   (* Case: [FAtom]. *)
   { econstructor. unfold dvdvx. predicate; term; eauto using Z.divide_refl. }
   (* Case: [FAnd]. *)
-  { econstructor; eapply all_dvdvx_transitive; eauto using Z.divide_lcm_l, Z.divide_lcm_r. }
+  { econstructor; eapply all_dvdvx_transitive;
+    eauto using Z.divide_lcm_l, Z.divide_lcm_r. }
   (* Case: [FOr]. *)
-  { econstructor; eapply all_dvdvx_transitive; eauto using Z.divide_lcm_l, Z.divide_lcm_r. }
+  { econstructor; eapply all_dvdvx_transitive;
+    eauto using Z.divide_lcm_l, Z.divide_lcm_r. }
   (* Case: [FNot]. *)
   { econstructor; eauto. }
 Qed.
@@ -2026,7 +2023,8 @@ Qed.
 
 (* Quantifier elimination for formulas, in the "sink" case. *)
 
-Notation sink_interpret env f := (sink (fun x => interpret_formula (extend env x) f)).
+Notation sink_interpret env f :=
+  (sink (fun x => interpret_formula (extend env x) f)).
 
 Notation sink_interpret_qe env f := (
   interpret_formula env (
@@ -2089,7 +2087,8 @@ Function bset (f : formula) : list term :=
     []
   | FAnd f1 f2
   | FOr f1 f2 =>
-    bset f1 ++ bset f2 (* TEMPORARY eliminate duplicates, implement sets of terms *)
+    (* TEMPORARY eliminate duplicates, implement sets of terms *)
+    bset f1 ++ bset f2
   | _ =>
     []
   end.
@@ -2262,7 +2261,8 @@ Qed.
 
 (* ------------------------------------------------------------------------- *)
 
-(* The main function of the implementation *)
+(* The main function of the implementation. [cooper] eliminates one existential
+   quantifier. *)
 
 Definition cooper (f : formula) : formula :=
   let f := unity f in
@@ -2275,6 +2275,8 @@ Definition cooper (f : formula) : formula :=
                 (big_disjunction (f_element j) bs)
   ) in
   shift (big_disjunction stage js).
+
+(* [cooper f] is equivalent to [FExists f], and is quantifier-free. *)
 
 Lemma interpret_cooper:
   forall env f,
@@ -2384,12 +2386,10 @@ Fixpoint qe (f : formula) : formula :=
     (* Innermost quantifiers are eliminated first. *)
     let f := qe f in
     (* Bring the body into NNF. *)
-    (* TEMPORARY: [cooper] preserves NNF. Could we do this just once as the
-       beginning? *)
     let f := posnnf f in
     (* An existential quantifier can be pushed into a disjunction, so each
-    toplevel disjunct can be treated independently. Over each disjunct, apply
-    [cooper] to eliminate the existential quantifier. *)
+       toplevel disjunct can be treated independently. Over each disjunct, apply
+       [cooper] to eliminate the existential quantifier. *)
     map_disjuncts cooper f
   end.
 
@@ -2455,6 +2455,8 @@ Proof.
   apply all_map_disjuncts; eauto using wf_posnnf, wf_cooper.
 Qed.
 
+(* [qe f] is equivalent to [f]. *)
+
 Lemma interpret_qe:
   forall f env,
   wff_ue f ->
@@ -2484,5 +2486,3 @@ Proof.
   { intros HH. destruct HH as [[x ?]|[x ?]]; exists x; tauto. }
   { intros HH. destruct HH as [x [?|?]]; [left|right]; exists x; tauto. }
 Qed.
-
-(* ------------------------------------------------------------------------- *)

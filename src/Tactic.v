@@ -2,14 +2,19 @@ Set Implicit Arguments.
 Require Import ZArith Psatz.
 Open Scope Z_scope.
 Require Import Znumtheory.
-Require Import MiniCooper.MyTactics.
-Require Import FunInd Recdef.
 Require Import List Sorting Permutation.
 Import ListNotations.
-Open Scope Z_scope.
 Open Scope list_scope.
 
+Require Import MiniCooper.MyTactics.
 Require Import MiniCooper.Theory.
+
+(* ------------------------------------------------------------------------- *)
+(* The surface syntax that the tactic recognizes.
+
+   The goal is to the least amount of work possible in Ltac, so the syntax is
+   directly reified to the surface syntax defined here, and
+   preprocessing/normalization is written as Coq functions. *)
 
 Notation ground := num (only parsing).
 
@@ -21,12 +26,8 @@ Inductive raw_term :=
 | RVar : var -> raw_term
 | RConstant : num -> raw_term.
 
-Hint Constructors raw_term.
-
 Inductive raw_predicate_1 :=
 | RDv : ground -> raw_predicate_1.
-
-Hint Constructors raw_predicate_1.
 
 Inductive raw_predicate_2 :=
 | REq : raw_predicate_2
@@ -35,13 +36,9 @@ Inductive raw_predicate_2 :=
 | RGt : raw_predicate_2
 | RGe : raw_predicate_2.
 
-Hint Constructors raw_predicate_2.
-
 Inductive raw_predicate :=
 | RPred1 : raw_predicate_1 -> raw_term -> raw_predicate
 | RPred2 : raw_predicate_2 -> raw_term -> raw_term -> raw_predicate.
-
-Hint Constructors raw_predicate.
 
 Inductive raw_formula :=
 | RAtom : raw_predicate -> raw_formula
@@ -52,11 +49,103 @@ Inductive raw_formula :=
 | RNot : raw_formula -> raw_formula
 | RExists : raw_formula -> raw_formula.
 
-Hint Constructors raw_formula.
+Hint Constructors
+     raw_term
+     raw_predicate_1 raw_predicate_2 raw_predicate
+     raw_formula.
+
+(* ------------------------------------------------------------------------- *)
+(* Semantics of the surface syntax. *)
+
+Fixpoint interpret_raw_term (env : environment) (t : raw_term) : num :=
+  match t with
+  | RAdd t1 t2 =>
+    (interpret_raw_term env t1) + (interpret_raw_term env t2)
+  | RSub t1 t2 =>
+    (interpret_raw_term env t1) - (interpret_raw_term env t2)
+  | RMul k v =>
+    k * (env v)
+  | ROpp t =>
+    - (interpret_raw_term env t)
+  | RVar v =>
+    env v
+  | RConstant c =>
+    c
+  end.
+
+Fixpoint interpret_raw_predicate_1 (p : raw_predicate_1) (t : num) : Prop :=
+  match p with
+  | RDv c =>
+    (c | t)
+  end.
+
+Fixpoint interpret_raw_predicate_2 (p : raw_predicate_2) (t1 t2 : num) : Prop :=
+  match p with
+  | REq =>
+    t1 = t2
+  | RLt =>
+    t1 < t2
+  | RLe =>
+    t1 <= t2
+  | RGt =>
+    t1 > t2
+  | RGe =>
+    t1 >= t2
+  end.
+
+Fixpoint interpret_raw_predicate (env : environment) (p : raw_predicate) : Prop :=
+  match p with
+  | RPred1 p t =>
+    interpret_raw_predicate_1 p (interpret_raw_term env t)
+  | RPred2 p t1 t2 =>
+    interpret_raw_predicate_2 p (interpret_raw_term env t1) (interpret_raw_term env t2)
+  end.
+
+Fixpoint interpret_raw_formula (env : environment) (f : raw_formula) : Prop :=
+  match f with
+  | RAtom p =>
+    interpret_raw_predicate env p
+  | RFalse =>
+    False
+  | RTrue =>
+    True
+  | RAnd f1 f2 =>
+    (interpret_raw_formula env f1) /\ (interpret_raw_formula env f2)
+  | ROr f1 f2 =>
+    (interpret_raw_formula env f1) \/ (interpret_raw_formula env f2)
+  | RNot f' =>
+    ~ (interpret_raw_formula env f')
+  | RExists f' =>
+    exists z, interpret_raw_formula (extend env z) f'
+  end.
+
+(* ------------------------------------------------------------------------- *)
+(* First intermediate representation for terms. *)
 
 Notation monoms_sign := (list (bool * (ground * var)))%type.
 Notation csts_sign := (list (bool * num))%type.
 Notation linearized_sign := (monoms_sign * csts_sign)%type.
+
+(* Its semantics *)
+
+Definition sign2num (b : bool) : num :=
+  if b then 1 else -1.
+
+Definition interpret_monoms_sign (env : environment) (l : monoms_sign) : num :=
+  fold_right (fun '(b, (k, v)) acc =>
+    acc + (sign2num b) * k * env v
+  ) 0 l.
+
+Definition interpret_csts_sign (l : csts_sign) : num :=
+  fold_right (fun '(b, x) acc =>
+    acc + (sign2num b) * x
+  ) 0 l.
+
+Definition interpret_linearized_sign (env : environment) '((l,c) : linearized_sign) : num :=
+  interpret_monoms_sign env l + interpret_csts_sign c.
+
+(* ------------------------------------------------------------------------- *)
+(* Conversion from a [raw_term] to a [linearized_sign]. *)
 
 Definition app2 A B (p1 p2: list A * list B) :=
   let '(l1a, l1b) := p1 in
@@ -100,8 +189,25 @@ Definition sub_linearized (t1 t2 : linearized_sign) : linearized_sign :=
   let '(l2, c2) := t2 in
   (l1 ++ neg_list l2, c1 ++ neg_list c2).
 
+(* ------------------------------------------------------------------------- *)
+(* Second intermediate representation for terms. *)
+
 Notation monoms := (list (ground * var))%type.
 Notation linearized := (monoms * num)%type.
+
+(* Its semantics *)
+
+Definition interpret_monoms (env : environment) (l : monoms) : num :=
+  fold_right (fun '(k, v) acc =>
+    acc + k * env v
+  ) 0 l.
+
+Definition interpret_linearized (env : environment) '((l, c) : linearized) : num
+:=
+  interpret_monoms env l + c.
+
+(* ------------------------------------------------------------------------- *)
+(* Translation from [linearized_sign] to [linearized]. *)
 
 Definition monoms_sign_to_monoms (l : monoms_sign) : monoms :=
   map (fun '(b, (k, v)) => if (b:bool) then (k, v) else (- k, v)) l.
@@ -109,8 +215,13 @@ Definition monoms_sign_to_monoms (l : monoms_sign) : monoms :=
 Definition csts_sign_to_csts (c : csts_sign) : num :=
   fold_right (fun '(b, x) acc => if (b:bool) then acc + x else acc - x) 0 c.
 
-Definition linearized_sign_to_linearized '((l, c) : linearized_sign) : linearized :=
+Definition linearized_sign_to_linearized '((l, c) : linearized_sign): linearized
+:=
   (monoms_sign_to_monoms l, csts_sign_to_csts c).
+
+(* ------------------------------------------------------------------------- *)
+(* Normalization procedure on [linearized] (the goal is to produce terms that
+   are well-formed according to [wft]). *)
 
 Definition clear_zeros (l : monoms) : monoms :=
   filter (fun '(k, _) => negb (Z.eqb k 0)) l.
@@ -135,8 +246,6 @@ Definition compact (l : monoms) : monoms :=
     compact_with m l'
   end.
 
-Require Import Sorting.
-
 Module MonomOrder <: Orders.TotalLeBool.
   Definition t := (num * var)%type.
   Definition leb (x y : t) := Nat.leb (snd x) (snd y).
@@ -159,6 +268,10 @@ Definition normalize_linearized (t : linearized) : linearized :=
   let l := compact l in
   let l := clear_zeros l in
   (l, c).
+
+(* ------------------------------------------------------------------------- *)
+(* Conversion to the internal syntax of formulas, defined in MiniCooper.Theory.
+*)
 
 Definition linearized_to_term (t : linearized) : term :=
   let '(l, c) := t in
@@ -224,98 +337,6 @@ Fixpoint raw_formula_to_formula (f : raw_formula) : formula :=
 (* ------------------------------------------------------------------------- *)
 (* Now prove that all these transformations preserve interpretation of
    terms/predicates/formulas. *)
-
-(* Semantics *)
-
-Fixpoint interpret_raw_term (env : environment) (t : raw_term) : num :=
-  match t with
-  | RAdd t1 t2 =>
-    (interpret_raw_term env t1) + (interpret_raw_term env t2)
-  | RSub t1 t2 =>
-    (interpret_raw_term env t1) - (interpret_raw_term env t2)
-  | RMul k v =>
-    k * (env v)
-  | ROpp t =>
-    - (interpret_raw_term env t)
-  | RVar v =>
-    env v
-  | RConstant c =>
-    c
-  end.
-
-Fixpoint interpret_raw_predicate_1 (p : raw_predicate_1) (t : num) : Prop :=
-  match p with
-  | RDv c =>
-    (c | t)
-  end.
-
-Fixpoint interpret_raw_predicate_2 (p : raw_predicate_2) (t1 t2 : num) : Prop :=
-  match p with
-  | REq =>
-    t1 = t2
-  | RLt =>
-    t1 < t2
-  | RLe =>
-    t1 <= t2
-  | RGt =>
-    t1 > t2
-  | RGe =>
-    t1 >= t2
-  end.
-
-Fixpoint interpret_raw_predicate (env : environment) (p : raw_predicate) : Prop :=
-  match p with
-  | RPred1 p t =>
-    interpret_raw_predicate_1 p (interpret_raw_term env t)
-  | RPred2 p t1 t2 =>
-    interpret_raw_predicate_2 p (interpret_raw_term env t1) (interpret_raw_term env t2)
-  end.
-
-Fixpoint interpret_raw_formula (env : environment) (f : raw_formula) : Prop :=
-  match f with
-  | RAtom p =>
-    interpret_raw_predicate env p
-  | RFalse =>
-    False
-  | RTrue =>
-    True
-  | RAnd f1 f2 =>
-    (interpret_raw_formula env f1) /\ (interpret_raw_formula env f2)
-  | ROr f1 f2 =>
-    (interpret_raw_formula env f1) \/ (interpret_raw_formula env f2)
-  | RNot f' =>
-    ~ (interpret_raw_formula env f')
-  | RExists f' =>
-    exists z, interpret_raw_formula (extend env z) f'
-  end.
-
-Definition sign2num (b : bool) : num :=
-  if b then 1 else -1.
-
-Definition interpret_monoms_sign (env : environment) (l : monoms_sign) : num :=
-  fold_right (fun '(b, (k, v)) acc =>
-    acc + (sign2num b) * k * env v
-  ) 0 l.
-
-Definition interpret_csts_sign (l : csts_sign) : num :=
-  fold_right (fun '(b, x) acc =>
-    acc + (sign2num b) * x
-  ) 0 l.
-
-Definition interpret_linearized_sign (env : environment) '((l,c) : linearized_sign) : num :=
-  interpret_monoms_sign env l + interpret_csts_sign c.
-
-Definition interpret_monoms (env : environment) (l : monoms) : num :=
-  fold_right (fun '(k, v) acc =>
-    acc + k * env v
-  ) 0 l.
-
-Definition interpret_linearized (env : environment) '((l, c) : linearized) : num :=
-  interpret_monoms env l + c.
-
-(* ------------------------------------------------------------------------- *)
-
-(* Proofs *)
 
 Create HintDb interp.
 
@@ -561,8 +582,8 @@ Qed.
 Hint Rewrite interpret_raw_formula_to_formula : interp.
 
 (* ------------------------------------------------------------------------- *)
-(* At the moment, we do not prove that this code produces well-formed terms and
-   formulas. Instead we write a checker. *)
+(* At the moment, we do not prove that the resulting formulas are well-formed.
+   Instead we write a checker. *)
 
 Fixpoint check_wft (n : nat) (t : term) : bool :=
   match t with
@@ -623,6 +644,7 @@ Proof.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
+(* The main theorem used by the tactic *)
 
 Definition empty_env : environment := (fun (n:nat) => 0).
 
@@ -637,6 +659,7 @@ Proof.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
+(* We use template-coq for the reification part. *)
 
 Require Import Template.All.
 
