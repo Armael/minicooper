@@ -213,7 +213,12 @@ Definition monoms_sign_to_monoms (l : monoms_sign) : monoms :=
   map (fun '(b, (k, v)) => if (b:bool) then (k, v) else (- k, v)) l.
 
 Definition csts_sign_to_csts (c : csts_sign) : num :=
-  fold_right (fun '(b, x) acc => if (b:bool) then acc + x else acc - x) 0 c.
+  match c with
+  | [] => 0
+  | (b, k) :: c' =>
+    fold_right (fun '(b, x) acc => if (b:bool) then acc + x else acc - x)
+               (if (b:bool) then k else -k) c'
+  end.
 
 Definition linearized_sign_to_linearized '((l, c) : linearized_sign): linearized
 :=
@@ -459,8 +464,10 @@ Lemma interpret_csts_sign_to_csts:
   forall l,
   csts_sign_to_csts l = interpret_csts_sign l.
 Proof.
+  destruct l as [| [? ?] l]; auto; simpl.
   induction l as [| [? ?]]; intros; simpl in *; eauto.
-  case_if; rewrite IHl; simpl; nia.
+  - case_if; simpl; nia.
+  - case_if; rewrite IHl; simpl; nia.
 Qed.
 
 Hint Rewrite

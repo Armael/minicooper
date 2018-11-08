@@ -771,9 +771,6 @@ Definition wf_negation := all_negation.
 
 (* Iterated disjunction, and iterated \/ *)
 
-(* TEMPORARY fold_left is probably more efficient, but fold_right has a nicer
-   induction principle... *)
-
 Definition big_disjunction A (F : A -> formula) (l : list A) : formula :=
   fold_right (fun x Q => disjunction (F x) Q) FFalse l.
 
