@@ -227,40 +227,33 @@ Definition linearized_to_term (t : linearized) : term :=
   let '(l, c) := t in
   fold_right (fun '(k, y) acc => TSummand k y acc) (TConstant c) l.
 
-Definition to_term (t : linearized) : term :=
+Definition to_term (t : raw_term) : term :=
+  let t := linearize_raw_term t in
   let t := normalize_linearized t in
   linearized_to_term t.
 
-Definition plus1 '((m, c) : linearized) : linearized :=
-  (m, cadd c (CGround 1)).
+Definition plus1 (t : raw_term) : raw_term :=
+  RAdd t (RConstant (CGround 1)).
 
 Definition raw_predicate_to_atom (p : raw_predicate) : predicate * term :=
   match p with
   | RPred1 (RDv c) t =>
-    let t := linearize_raw_term t in
     if Z.eqb c 0 then
       (Eq, to_term t)
     else
       (Dv c, to_term t)
   | RPred2 p t1 t2 =>
-    let t1 := linearize_raw_term t1 in
-    let t2 := linearize_raw_term t2 in
     match p with
     | REq => (* t1 = t2 *)
-      let t := sub_lin t2 t1 in (* 0 = t2 - t1 *)
-      (Eq, to_term t)
+      (Eq, to_term (RSub t2 t1)) (* 0 = t2 - t1 *)
     | RLt => (* t1 < t2 *)
-      let t := sub_lin t2 t1 in (* 0 < t2 - t1 *)
-      (Lt, to_term t)
+      (Lt, to_term (RSub t2 t1)) (* 0 < t2 - t1 *)
     | RLe => (* t1 <= t2 *)
-      let t := plus1 (sub_lin t2 t1) in (* 0 < t2 - t1 + 1 *)
-      (Lt, to_term t)
+      (Lt, to_term (plus1 (RSub t2 t1))) (* 0 < t2 - t1 + 1 *)
     | RGt => (* t1 > t2 *)
-      let t := sub_lin t1 t2 in (* 0 < t1 - t2 *)
-      (Lt, to_term t)
+      (Lt, to_term (RSub t1 t2)) (* 0 < t1 - t2 *)
     | RGe => (* t1 >= t2 *)
-      let t := plus1 (sub_lin t1 t2) in (* 0 < t1 - t2 + 1 *)
-      (Lt, to_term t)
+      (Lt, to_term (plus1 (RSub t1 t2))) (* 0 < t1 - t2 + 1 *)
     end
   end.
 
@@ -405,16 +398,16 @@ Hint Rewrite interpret_linearized_to_term : interp.
 Lemma interpret_to_term:
   forall cenv env t,
   interpret_term cenv env (to_term t) =
-  interpret_linearized cenv env t.
+  interpret_raw_term cenv env t.
 Proof. intros. unfold to_term. now interp. Qed.
 
 Hint Rewrite interpret_to_term : interp.
 
 Lemma interpret_plus1:
   forall cenv env t,
-  interpret_linearized cenv env (plus1 t) =
-  interpret_linearized cenv env t + 1.
-Proof. destruct t as [? ?]. interp. simpl. lia. Qed.
+  interpret_raw_term cenv env (plus1 t) =
+  interpret_raw_term cenv env t + 1.
+Proof. intros; interp. lia. Qed.
 
 Hint Rewrite interpret_plus1 : interp.
 
@@ -427,7 +420,7 @@ Proof.
   intros cenv env p. destruct p as [p1|p2].
   { destruct p1. simpl. case_if; interp; subst; try reflexivity.
     split; [ intros <- | intros ]. reflexivity. forwards*: Z.divide_0_l. }
-  { destruct p2; interp; lia. }
+  { destruct p2; interp; simpl; lia. }
 Qed.
 
 Lemma interpret_raw_formula_to_formula:
