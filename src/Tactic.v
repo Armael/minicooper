@@ -8,6 +8,7 @@ Open Scope list_scope.
 
 Require Import MiniCooper.MyTactics.
 Require Import MiniCooper.Theory.
+Require Import MiniCooper.LinSimpl.
 
 (* ------------------------------------------------------------------------- *)
 (* The surface syntax that the tactic recognizes.
@@ -123,17 +124,25 @@ Fixpoint interpret_raw_formula (cenv env : environment) (f : raw_formula)
   end.
 
 (* ------------------------------------------------------------------------- *)
-(* Intermediate representation for terms. *)
+(* Intermediate representation for terms as a linear combination. *)
 
-Notation monoms := (list (ground * var))%type.
-Notation linearized := (monoms * constant)%type.
+Module MonomVar <: LinVar.
+  Definition t := var.
+  Definition eqdec := Nat.eq_dec.
+  Definition leb := Nat.leb.
+  Lemma leb_total : forall a b, is_true (Nat.leb a b) \/ is_true (Nat.leb b a).
+  Proof.
+    intros. unfold is_true. rewrite !Nat.leb_le. lia.
+  Qed.
+End MonomVar.
+
+Module Monoms := LinSimpl (MonomVar).
+
+Notation linearized := (Monoms.lin * constant)%type.
 
 (* Its semantics *)
 
-Definition interpret_monoms (env : environment) (l : monoms) : num :=
-  fold_right (fun '(k, v) acc =>
-    acc + k * env v
-  ) 0 l.
+Definition interpret_monoms := Monoms.interpret_lin.
 
 Definition interpret_linearized (cenv env : environment) '((l, c) : linearized)
 : num :=
@@ -148,7 +157,7 @@ Definition add_lin (l1 l2 : linearized) :=
   (m1 ++ m2, cadd c1 c2).
 
 Definition neg_lin '((m, c) : linearized) :=
-  (map (fun '(k, v) => (-k, v)) m, cneg c).
+  (map (fun '(v, k) => (v, -k)) m, cneg c).
 
 Definition sub_lin (l1 l2 : linearized) :=
   add_lin l1 (neg_lin l2).
@@ -160,64 +169,17 @@ Fixpoint linearize_raw_term (t : raw_term) : linearized :=
   | RSub t1 t2 =>
     sub_lin (linearize_raw_term t1) (linearize_raw_term t2)
   | RMul k v =>
-    ([(k, v)], CGround 0)
+    ([(v, k)], CGround 0)
   | ROpp t =>
     neg_lin (linearize_raw_term t)
   | RVar v =>
-    ([(1, v)], CGround 0)
+    ([(v, 1)], CGround 0)
   | RConstant x =>
     ([], x)
   end.
 
-(* ------------------------------------------------------------------------- *)
-(* Normalization procedure on [linearized] (the goal is to produce terms that
-   are well-formed according to [wft]). *)
-
-Definition clear_zeros (l : monoms) : monoms :=
-  filter (fun '(k, _) => negb (Z.eqb k 0)) l.
-
-Fixpoint compact_with (m : ground * var) (l : monoms) : monoms :=
-  let '(k, v) := m in
-  match l with
-  | [] =>
-    [m]
-  | (k', v') :: l' =>
-    if Nat.eqb v v' then
-      compact_with (k + k', v) l'
-    else
-      m :: compact_with (k', v') l'
-  end.
-
-Definition compact (l : monoms) : monoms :=
-  match l with
-  | [] =>
-    []
-  | m :: l' =>
-    compact_with m l'
-  end.
-
-Module MonomOrder <: Orders.TotalLeBool.
-  Definition t := (num * var)%type.
-  Definition leb (x y : t) := Nat.leb (snd x) (snd y).
-  Lemma leb_total : forall a b, is_true (leb a b) \/ is_true (leb b a).
-  Proof.
-    destruct a, b; unfold leb; simpl.
-    destruct (n <=? n0)%nat eqn:H1; [now left | right].
-    destruct (n0 <=? n)%nat eqn:H2; auto.
-    apply Nat.leb_gt in H1.
-    apply Nat.leb_gt in H2.
-    omega.
-  Qed.
-End MonomOrder.
-
-Module MonomSort := Sort MonomOrder.
-
-Definition normalize_linearized (t : linearized) : linearized :=
-  let '(l, c) := t in
-  let l := MonomSort.sort l in
-  let l := compact l in
-  let l := clear_zeros l in
-  (l, c).
+Definition normalize_linearized '((l, c) : linearized) : linearized :=
+  (Monoms.simpl l, c).
 
 (* ------------------------------------------------------------------------- *)
 (* Conversion to the internal syntax of formulas, defined in MiniCooper.Theory.
@@ -225,7 +187,7 @@ Definition normalize_linearized (t : linearized) : linearized :=
 
 Definition linearized_to_term (t : linearized) : term :=
   let '(l, c) := t in
-  fold_right (fun '(k, y) acc => TSummand k y acc) (TConstant c) l.
+  fold_right (fun '(y, k) acc => TSummand k y acc) (TConstant c) l.
 
 Definition to_term (t : raw_term) : term :=
   let t := linearize_raw_term t in
@@ -333,53 +295,14 @@ Qed.
 
 Hint Rewrite interpret_linearize_raw_term : interp.
 
-Lemma interpret_clear_zeros:
-  forall env l,
-  interpret_monoms env (clear_zeros l) = interpret_monoms env l.
-Proof.
-  induction l as [| [? ?]]; intros; simpl in *; eauto.
-  case_if; interp; nia.
-Qed.
-
-Hint Rewrite interpret_clear_zeros : interp.
-
-Lemma interpret_compact_with:
-  forall env l k v,
-  interpret_monoms env (compact_with (k,v) l) =
-  k * env v + interpret_monoms env l.
-Proof.
-  induction l as [| [? ?]]; intros; simpl in *; eauto.
-  case_if; simpl; rewrite IHl; interp; subst; nia.
-Qed.
-
-Lemma interpret_compact:
-  forall env l,
-  interpret_monoms env (compact l) = interpret_monoms env l.
-Proof.
-  intros. unfold compact. destruct l as [|[? ?]]; eauto.
-  rewrite interpret_compact_with. simpl. nia.
-Qed.
-
-Hint Rewrite interpret_compact : interp.
-
-Lemma interpret_monoms_permutation:
-  forall env l1 l2,
-  Permutation l1 l2 ->
-  interpret_monoms env l1 = interpret_monoms env l2.
-Proof.
-  introv HP. induction HP;
-  repeat match goal with x: (_ * _)%type |- _ => destruct x end;
-  simpl; auto.
-Qed.
-
 Lemma interpret_normalize_linearized:
   forall cenv env t,
   interpret_linearized cenv env (normalize_linearized t) =
   interpret_linearized cenv env t.
 Proof.
-  destruct t as [l c]. unfold normalize_linearized. interp.
-  rewrite interpret_monoms_permutation with (l1:=l) (l2:=(MonomSort.sort l));
-  auto using MonomSort.Permuted_sort.
+  destruct t as [l c].
+  unfold normalize_linearized, interpret_linearized.
+  now rewrite Monoms.interpret_simpl.
 Qed.
 
 Hint Rewrite interpret_normalize_linearized : interp.
