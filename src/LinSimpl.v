@@ -16,6 +16,17 @@ Module Type LinVar.
   Parameter leb_total : forall a b, is_true (leb a b) \/ is_true (leb b a).
 End LinVar.
 
+Module NatVar <: LinVar.
+  Definition t := nat.
+  Definition eqdec := Nat.eq_dec.
+  Definition leb := Nat.leb.
+  Lemma leb_total : forall a b, is_true (Nat.leb a b) \/ is_true (Nat.leb b a).
+  Proof.
+    intros. unfold is_true. rewrite !Nat.leb_le. lia.
+  Qed.
+End NatVar.
+
+
 Module LinSimpl (Var : LinVar).
 
 (* A monom is a variable multiplied by a constant coefficient *)
@@ -24,6 +35,48 @@ Notation monom := (Var.t * Z)%type.
 (* A linear combination is a list of monoms, and should be interpreted as their
    sum. *)
 Definition lin := list monom.
+
+Definition interpret_lin (var : Var.t -> Z) (l : lin) : Z :=
+  fold_right (fun '(v, k) acc =>
+    acc + k * var v
+  ) 0 l.
+
+(* ------------------------------------------------------------------------- *)
+
+Definition add (l1 l2 : lin) :=
+  l1 ++ l2.
+
+Lemma interpret_add:
+  forall var l1 l2,
+  interpret_lin var (add l1 l2) =
+  interpret_lin var l1 + interpret_lin var l2.
+Proof.
+  induction l1 as [|[? ?]]; intros; simpl in *; rewrite ?IHl1; eauto.
+Qed.
+
+Definition mul (k : Z) (l : lin) :=
+  map (fun '(v, k') => (v, k * k')) l.
+
+Lemma interpret_mul:
+  forall var k l,
+  interpret_lin var (mul k l) = k * interpret_lin var l.
+Proof.
+  induction l as [|[? ?]]; intros; simpl in *; rewrite ?IHl; lia.
+Qed.
+
+Definition sub (l1 l2 : lin) :=
+  add l1 (mul (-1) l2).
+
+Lemma interpret_sub:
+  forall var l1 l2,
+  interpret_lin var (sub l1 l2) =
+  interpret_lin var l1 -
+  interpret_lin var l2.
+Proof.
+  intros; unfold sub; rewrite interpret_add, interpret_mul; lia.
+Qed.
+
+(* ------------------------------------------------------------------------- *)
 
 Definition clear_zeros (l : lin) : lin :=
   filter (fun '(v, k) => negb (Z.eqb k 0)) l.
@@ -68,11 +121,6 @@ Definition simpl (l : lin) : lin :=
   clear_zeros l.
 
 (* ------------------------------------------------------------------------- *)
-
-Definition interpret_lin (var : Var.t -> Z) (l : lin) : Z :=
-  fold_right (fun '(v, k) acc =>
-    acc + k * var v
-  ) 0 l.
 
 Local Ltac rew :=
   rewrite

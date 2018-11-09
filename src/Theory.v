@@ -6,6 +6,7 @@ Require Import FunInd Recdef.
 Require Import List.
 Import ListNotations.
 Require Import MiniCooper.MyTactics.
+Require Import MiniCooper.Constant.
 Open Scope list_scope.
 Open Scope Z_scope.
 
@@ -97,78 +98,6 @@ Definition enveq (env1 env2 : environment) : Prop :=
   forall x, env1 x = env2 x.
 
 (* ------------------------------------------------------------------------- *)
-(* Constants can be a combination of numeric literals and arbitrary expressions
-   (that are treated as abstract and kept in an environment). *)
-
-Inductive constant :=
-| CAdd: constant -> constant -> constant
-| CMul: constant -> constant -> constant
-| CGround: Z -> constant
-| CAbstract: var -> constant.
-
-Fixpoint interpret_constant (cenv : environment) (c : constant) : num :=
-  match c with
-  | CAdd c1 c2 =>
-    (interpret_constant cenv c1) + (interpret_constant cenv c2)
-  | CMul c1 c2 =>
-    (interpret_constant cenv c1) * (interpret_constant cenv c2)
-  | CGround k =>
-    k
-  | CAbstract v =>
-    cenv v
-  end.
-
-Function cadd (c1 c2 : constant) : constant :=
-  match (c1, c2) with
-  | (CGround k1, CGround k2) =>
-    CGround (k1 + k2)
-  | (CGround 0, _) =>
-    c2
-  | (_, CGround 0) =>
-    c1
-  | (_, _) =>
-    CAdd c1 c2
-  end.
-
-Lemma interpret_cadd:
-  forall cenv c1 c2,
-  interpret_constant cenv (cadd c1 c2) =
-  interpret_constant cenv c1 + interpret_constant cenv c2.
-Proof.
-  intros. functional induction (cadd c1 c2); simpl in *; eauto.
-Qed.
-
-Function cmul (c1 c2 : constant) : constant :=
-  match (c1, c2) with
-  | (CGround k1, CGround k2) =>
-    CGround (k1 * k2)
-  | (CGround 1, _) =>
-    c2
-  | (_, CGround 1) =>
-    c1
-  | (_, _) =>
-    CMul c1 c2
-  end.
-
-Local Arguments Z.mul : simpl nomatch.
-
-Lemma interpret_cmul:
-  forall cenv c1 c2,
-  interpret_constant cenv (cmul c1 c2) =
-  interpret_constant cenv c1 * interpret_constant cenv c2.
-Proof.
-  intros. functional induction (cmul c1 c2); simpl in *; eauto.
-Qed.
-
-Definition cneg (c : constant) : constant :=
-  cmul (CGround (-1)) c.
-
-Lemma interpret_cneg:
-  forall cenv c,
-  interpret_constant cenv (cneg c) = - interpret_constant cenv c.
-Proof. intros. unfold cneg. rewrite interpret_cmul. eauto. Qed.
-
-(* ------------------------------------------------------------------------- *)
 
 (* A term is a sum of summands of the form [k.x], where [k] is a constant and
    [x] is a variable, and of a final constant. *)
@@ -221,7 +150,7 @@ Fixpoint mul_nonzero (n : num) (t : term) : term :=
   | TSummand k x u =>
       TSummand (n * k) x (mul_nonzero n u)
   | TConstant k =>
-      TConstant (cmul (CGround n) k)
+      TConstant (cmul n k)
   end.
 
 Definition mul (n : num) (t : term) : term :=
@@ -2430,6 +2359,114 @@ Proof.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
+(* A simplification procedure for terms & formulas *)
+
+Fixpoint simpl_term (t : term) : term :=
+  match t with
+  | TSummand k y u =>
+    TSummand k y (simpl_term u)
+  | TConstant c =>
+    TConstant (simpl_constant c)
+  end.
+
+Definition boolf (b : bool) : formula :=
+  match b with
+  | true => FTrue
+  | false => FFalse
+  end.
+
+Definition Zdivideb (x y : Z) : bool :=
+  if Zdivide_dec x y then true else false.
+
+Function simpl_atom (p : predicate) (t : term) : formula :=
+  match t with
+  | TConstant (CGround k) =>
+    match p with
+    | Eq => boolf (Z.eqb 0 k)
+    | Lt => boolf (Z.ltb 0 k)
+    | Dv z => boolf (Zdivideb z k)
+    end
+  | _ => FAtom p t
+  end.
+
+Fixpoint simpl_formula (f : formula) : formula :=
+  match f with
+  | FAtom p t =>
+    simpl_atom p (simpl_term t)
+  | FFalse =>
+    FFalse
+  | FTrue =>
+    FTrue
+  | FAnd f1 f2 =>
+    conjunction (simpl_formula f1) (simpl_formula f2)
+  | FOr f1 f2 =>
+    disjunction (simpl_formula f1) (simpl_formula f2)
+  | FNot f =>
+    FNot (simpl_formula f)
+  | FExists f =>
+    FExists (simpl_formula f)
+  end.
+
+Lemma interpret_simpl_term:
+  forall cenv env t,
+  interpret_term cenv env (simpl_term t) =
+  interpret_term cenv env t.
+Proof.
+  induction t; intros; simpl in *; eauto using interpret_simpl_constant.
+Qed.
+
+Lemma wft_simpl_term:
+  forall t n,
+  wft n t ->
+  wft n (simpl_term t).
+Proof. induction t; intros; simpl in *; wft; eauto. Qed.
+
+Lemma interpret_simpl_atom:
+  forall cenv env p t,
+  interpret_formula cenv env (simpl_atom p t) <->
+  interpret_formula cenv env (FAtom p t).
+Proof.
+  intros.
+  functional induction (simpl_atom p t); unfold boolf, Zdivideb in *;
+    repeat case_if; simpl;
+    rewrite ?Z.eqb_eq, ?Z.eqb_neq, ?Z.ltb_lt, ?Z.ltb_ge in *;
+    try lia; tauto.
+Qed.
+
+Lemma wf_simpl_atom:
+  forall p t,
+  wft 0 t ->
+  wfp p ->
+  wff (simpl_atom p t).
+Proof.
+  intros.
+  functional induction (simpl_atom p t); unfold boolf; cbn -[Z.eqb]; eauto;
+    case_if; eauto.
+Qed.
+
+Lemma interpret_simpl_formula:
+  forall cenv f env,
+  interpret_formula cenv env (simpl_formula f) <->
+  interpret_formula cenv env f.
+Proof.
+  induction f; intros; simpl in *; eauto; try tauto.
+  - now rewrite interpret_simpl_atom; simpl; rewrite interpret_simpl_term.
+  - rewrite interpret_conjunction, IHf1, IHf2. tauto.
+  - rewrite interpret_disjunction, IHf1, IHf2. tauto.
+  - rewrite IHf. tauto.
+  - apply exists_equivalence. eauto.
+Qed.
+
+Lemma wf_simpl_formula:
+  forall f,
+  wff f ->
+  wff (simpl_formula f).
+Proof.
+  induction f; intros; simpl in *; wff; unpack;
+    eauto using wft_simpl_term, wf_simpl_atom, wf_conjunction, wf_disjunction.
+Qed.
+
+(* ------------------------------------------------------------------------- *)
 
 (* The main quantifier elimination algorithm: [qe] turns a formula into an
    equivalent quantifier-free formula. *)
@@ -2462,7 +2499,8 @@ Fixpoint qe (f : formula) : formula :=
     (* An existential quantifier can be pushed into a disjunction, so each
        toplevel disjunct can be treated independently. Over each disjunct, apply
        [cooper] to eliminate the existential quantifier. *)
-    map_disjuncts cooper f
+    let f := map_disjuncts cooper f in
+    simpl_formula f
   end.
 
 (* ------------------------------------------------------------------------- *)
@@ -2524,7 +2562,7 @@ Lemma wf_qe:
 Proof.
   induction f; intros; simpl in *; wff_ue;
     eauto using wf_conjunction, wf_disjunction, wf_negation.
-  apply all_map_disjuncts; eauto using wf_posnnf, wf_cooper.
+  apply wf_simpl_formula, all_map_disjuncts; eauto using wf_posnnf, wf_cooper.
 Qed.
 
 (* [qe f] is equivalent to [f]. *)
@@ -2551,6 +2589,7 @@ Proof.
   { rewrite~ interpret_cooper. simpl. apply exists_equivalence.
     intro. rewrite~ interpret_posnnf. }
 
+  rewrite interpret_simpl_formula.
   functional induction (map_disjuncts cooper (posnnf (qe f))); try tauto;[].
   rewrite interpret_disjunction. wff. nnf.
   rewrite !interpret_cooper by auto.

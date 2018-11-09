@@ -7,6 +7,7 @@ Import ListNotations.
 Open Scope list_scope.
 
 Require Import MiniCooper.MyTactics.
+Require Import MiniCooper.Constant.
 Require Import MiniCooper.Theory.
 Require Import MiniCooper.LinSimpl.
 
@@ -17,18 +18,16 @@ Require Import MiniCooper.LinSimpl.
    directly reified to the surface syntax defined here, and
    preprocessing/normalization is written as Coq functions. *)
 
-Notation ground := num (only parsing).
-
 Inductive raw_term :=
 | RAdd : raw_term -> raw_term -> raw_term
 | RSub : raw_term -> raw_term -> raw_term
-| RMul : ground -> var -> raw_term
+| RMul : num -> var -> raw_term
 | ROpp : raw_term -> raw_term
 | RVar : var -> raw_term
 | RConstant : constant -> raw_term.
 
 Inductive raw_predicate_1 :=
-| RDv : ground -> raw_predicate_1.
+| RDv : num -> raw_predicate_1.
 
 Inductive raw_predicate_2 :=
 | REq : raw_predicate_2
@@ -126,27 +125,12 @@ Fixpoint interpret_raw_formula (cenv env : environment) (f : raw_formula)
 (* ------------------------------------------------------------------------- *)
 (* Intermediate representation for terms as a linear combination. *)
 
-Module MonomVar <: LinVar.
-  Definition t := var.
-  Definition eqdec := Nat.eq_dec.
-  Definition leb := Nat.leb.
-  Lemma leb_total : forall a b, is_true (Nat.leb a b) \/ is_true (Nat.leb b a).
-  Proof.
-    intros. unfold is_true. rewrite !Nat.leb_le. lia.
-  Qed.
-End MonomVar.
-
-Module Monoms := LinSimpl (MonomVar).
-
+Module Monoms := LinSimpl (NatVar).
 Notation linearized := (Monoms.lin * constant)%type.
-
-(* Its semantics *)
-
-Definition interpret_monoms := Monoms.interpret_lin.
 
 Definition interpret_linearized (cenv env : environment) '((l, c) : linearized)
 : num :=
-  interpret_monoms env l + interpret_constant cenv c.
+  Monoms.interpret_lin env l + interpret_constant cenv c.
 
 (* ------------------------------------------------------------------------- *)
 (* Conversion from a [raw_term] to a [linearized]. *)
@@ -154,10 +138,10 @@ Definition interpret_linearized (cenv env : environment) '((l, c) : linearized)
 Definition add_lin (l1 l2 : linearized) :=
   let '(m1, c1) := l1 in
   let '(m2, c2) := l2 in
-  (m1 ++ m2, cadd c1 c2).
+  (Monoms.add m1 m2, cadd c1 c2).
 
 Definition neg_lin '((m, c) : linearized) :=
-  (map (fun '(v, k) => (v, -k)) m, cneg c).
+  (Monoms.mul (-1) m, cmul (-1) c).
 
 Definition sub_lin (l1 l2 : linearized) :=
   add_lin l1 (neg_lin l2).
@@ -248,7 +232,8 @@ Hint Rewrite
      Nat.eqb_eq Nat.eqb_neq
      Bool.negb_false_iff Bool.negb_true_iff
      Z.eqb_eq Z.eqb_neq
-     interpret_cadd interpret_cmul interpret_cneg
+     Monoms.interpret_add Monoms.interpret_mul
+     interpret_cadd interpret_cmul
 : interp.
 
 Ltac interp :=
@@ -262,6 +247,8 @@ Proof.
   destruct l1 as [m1 c1]. destruct l2 as [m2 c2].
   induction m1 as [| [? ?]]; intros; simpl in *; interp; eauto.
 Qed.
+
+Local Arguments Z.mul : simpl nomatch.
 
 Lemma interpret_neg_lin:
   forall cenv env l,
@@ -282,8 +269,6 @@ Proof.
 Qed.
 
 Hint Rewrite interpret_add_lin interpret_neg_lin interpret_sub_lin : interp.
-
-Local Arguments Z.mul : simpl nomatch.
 
 Lemma interpret_linearize_raw_term:
   forall cenv env t,
@@ -479,6 +464,16 @@ Ltac is_ground_Z term :=
     is_ground_positive pos
   end.
 
+Ltac try_lookup_constant c csts idx cont_found cont_fail :=
+  lazymatch csts with
+  | [] =>
+    cont_fail tt
+  | c :: _ =>
+    cont_found idx
+  | _ :: ?csts' =>
+    try_lookup_constant c csts' (S idx) cont_found cont_fail
+  end.
+
 Ltac reflect_term term csts cid cont :=
   lazymatch term with
   | tApp (tConst "Coq.ZArith.BinIntDef.Z.add" []) [?x; ?y] =>
@@ -505,12 +500,16 @@ Ltac reflect_term term csts cid cont :=
   | tRel ?n =>
     cont (RVar n) csts cid
   | ?x =>
-    denote_term x ltac:(fun k =>
-      tryif is_ground_Z x then
-        cont (RConstant (CGround k)) csts cid
-      else
-        cont (RConstant (CAbstract cid)) (k::csts) (S cid)
-    )
+    tryif is_ground_Z x then
+      denote_term x ltac:(fun k =>
+      cont (RConstant (CGround k)) csts cid)
+    else
+      try_lookup_constant x csts O
+        ltac:(fun idx =>
+          let cidx := eval cbv in (cid - idx - 1)%nat in
+          cont (RConstant (CAbstract cidx)) csts cid)
+        ltac:(fun tt =>
+          cont (RConstant (CAbstract cid)) (x::csts) (S cid))
   end.
 
 Ltac reflect_predicate term csts cid cont :=
@@ -574,38 +573,60 @@ Ltac reflect_formula term csts cid cont :=
     cont (RAtom p) csts cid)
   end.
 
+Ltac denote_csts csts cont :=
+  lazymatch csts with
+  | [] => cont ([]:list num)
+  | ?x :: ?csts' =>
+    denote_term x ltac:(fun k =>
+    denote_csts csts' ltac:(fun kcsts' =>
+    cont (k :: kcsts')))
+  end.
+
 Fixpoint myrev (l l' : list num) : list num :=
   match l with
   | [] => l'
   | x :: xs => myrev xs (x :: l')
   end.
 
-Ltac mkcenv csts :=
-  let csts := eval cbv [myrev] in (myrev csts []) in
-  constr:(fun n => nthZ n csts).
+Ltac mkcenv csts cont :=
+  denote_csts csts ltac:(fun csts =>
+    let csts := eval cbv [myrev] in (myrev csts []) in
+    cont constr:(fun n => nthZ n csts)
+  ).
 
 Ltac qe :=
   match goal with |- ?X => quote_term X ltac:(fun tm =>
-    reflect_formula tm ([]:list num) 0%nat ltac:(fun f csts _ =>
-      let cenv := mkcenv csts in
-      eapply (@cooper_qe_theorem cenv f); [
-        cbv; reflexivity
-      | cbv; reflexivity
-      | cbv [interpret_formula interpret_predicate
-             interpret_term interpret_constant nthZ]
-      ]
+    reflect_formula tm ([]:list term) 0%nat ltac:(fun f csts _ =>
+      mkcenv csts ltac:(fun cenv =>
+        eapply (@cooper_qe_theorem cenv f); [
+          cbv; reflexivity
+        | cbv; reflexivity
+        | cbv [interpret_formula interpret_predicate
+               interpret_term interpret_constant nthZ]
+        ]
+      )
     )
   ) end.
 
 Goal exists x, 0 <= 2 * x + 5 \/ x > 3.
-  qe. cbn. lia.
+  qe. auto.
 Qed.
 
 Goal forall a, exists x, a <= x /\ x < a + 1.
-  intro. qe.
-  lia.
+  intro. qe. auto.
 Qed.
+
+Goal ~ (exists x y, 2 * x + 1 = 2 * y).
+  intros. qe. auto.
+Qed.
+
+Goal exists x y, 4 * x - 6 * y = 1.
+  qe.
+Abort.
 
 Goal forall a b, ~ (exists x, ~(~ (b < x) \/ a <= x)).
   intros. qe.
 Abort.
+
+(* Goal ~ (exists x, ~ (exists y, 2 * y <= x /\ x < 2 * (y + 1))). *)
+(*   qe. *)

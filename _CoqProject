@@ -1,5 +1,6 @@
 -Q src MiniCooper
 src/MyTactics.v
 src/LinSimpl.v
+src/Constant.v
 src/Theory.v
 src/Tactic.v
