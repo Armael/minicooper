@@ -24,7 +24,7 @@ Inductive raw_term :=
 | RMul : ground -> var -> raw_term
 | ROpp : raw_term -> raw_term
 | RVar : var -> raw_term
-| RConstant : num -> raw_term.
+| RConstant : constant -> raw_term.
 
 Inductive raw_predicate_1 :=
 | RDv : ground -> raw_predicate_1.
@@ -57,20 +57,20 @@ Hint Constructors
 (* ------------------------------------------------------------------------- *)
 (* Semantics of the surface syntax. *)
 
-Fixpoint interpret_raw_term (env : environment) (t : raw_term) : num :=
+Fixpoint interpret_raw_term (cenv env : environment) (t : raw_term) : num :=
   match t with
   | RAdd t1 t2 =>
-    (interpret_raw_term env t1) + (interpret_raw_term env t2)
+    (interpret_raw_term cenv env t1) + (interpret_raw_term cenv env t2)
   | RSub t1 t2 =>
-    (interpret_raw_term env t1) - (interpret_raw_term env t2)
+    (interpret_raw_term cenv env t1) - (interpret_raw_term cenv env t2)
   | RMul k v =>
     k * (env v)
   | ROpp t =>
-    - (interpret_raw_term env t)
+    - (interpret_raw_term cenv env t)
   | RVar v =>
     env v
   | RConstant c =>
-    c
+    interpret_constant cenv c
   end.
 
 Fixpoint interpret_raw_predicate_1 (p : raw_predicate_1) (t : num) : Prop :=
@@ -93,107 +93,40 @@ Fixpoint interpret_raw_predicate_2 (p : raw_predicate_2) (t1 t2 : num) : Prop :=
     t1 >= t2
   end.
 
-Fixpoint interpret_raw_predicate (env : environment) (p : raw_predicate) : Prop :=
+Fixpoint interpret_raw_predicate (cenv env : environment) (p : raw_predicate)
+: Prop :=
   match p with
   | RPred1 p t =>
-    interpret_raw_predicate_1 p (interpret_raw_term env t)
+    interpret_raw_predicate_1 p (interpret_raw_term cenv env t)
   | RPred2 p t1 t2 =>
-    interpret_raw_predicate_2 p (interpret_raw_term env t1) (interpret_raw_term env t2)
+    interpret_raw_predicate_2 p
+      (interpret_raw_term cenv env t1) (interpret_raw_term cenv env t2)
   end.
 
-Fixpoint interpret_raw_formula (env : environment) (f : raw_formula) : Prop :=
+Fixpoint interpret_raw_formula (cenv env : environment) (f : raw_formula)
+: Prop :=
   match f with
   | RAtom p =>
-    interpret_raw_predicate env p
+    interpret_raw_predicate cenv env p
   | RFalse =>
     False
   | RTrue =>
     True
   | RAnd f1 f2 =>
-    (interpret_raw_formula env f1) /\ (interpret_raw_formula env f2)
+    (interpret_raw_formula cenv env f1) /\ (interpret_raw_formula cenv env f2)
   | ROr f1 f2 =>
-    (interpret_raw_formula env f1) \/ (interpret_raw_formula env f2)
+    (interpret_raw_formula cenv env f1) \/ (interpret_raw_formula cenv env f2)
   | RNot f' =>
-    ~ (interpret_raw_formula env f')
+    ~ (interpret_raw_formula cenv env f')
   | RExists f' =>
-    exists z, interpret_raw_formula (extend env z) f'
+    exists z, interpret_raw_formula cenv (extend env z) f'
   end.
 
 (* ------------------------------------------------------------------------- *)
-(* First intermediate representation for terms. *)
-
-Notation monoms_sign := (list (bool * (ground * var)))%type.
-Notation csts_sign := (list (bool * num))%type.
-Notation linearized_sign := (monoms_sign * csts_sign)%type.
-
-(* Its semantics *)
-
-Definition sign2num (b : bool) : num :=
-  if b then 1 else -1.
-
-Definition interpret_monoms_sign (env : environment) (l : monoms_sign) : num :=
-  fold_right (fun '(b, (k, v)) acc =>
-    acc + (sign2num b) * k * env v
-  ) 0 l.
-
-Definition interpret_csts_sign (l : csts_sign) : num :=
-  fold_right (fun '(b, x) acc =>
-    acc + (sign2num b) * x
-  ) 0 l.
-
-Definition interpret_linearized_sign (env : environment) '((l,c) : linearized_sign) : num :=
-  interpret_monoms_sign env l + interpret_csts_sign c.
-
-(* ------------------------------------------------------------------------- *)
-(* Conversion from a [raw_term] to a [linearized_sign]. *)
-
-Definition app2 A B (p1 p2: list A * list B) :=
-  let '(l1a, l1b) := p1 in
-  let '(l2a, l2b) := p2 in
-  (l1a ++ l2a, l1b ++ l2b).
-
-Notation "x ++2 y" := (app2 x y) (at level 50).
-
-Fixpoint linearize_raw_term'
-  (t : raw_term)
-  (sign : bool)
-: linearized_sign
-:=
-  match t with
-  | RAdd t1 t2 =>
-    (linearize_raw_term' t1 sign) ++2 (linearize_raw_term' t2 sign)
-  | RSub t1 t2 =>
-    (linearize_raw_term' t1 sign) ++2 (linearize_raw_term' t2 (negb sign))
-  | RMul k v =>
-    ([(sign, (k, v))], [])
-  | ROpp t =>
-    linearize_raw_term' t (negb sign)
-  | RVar v =>
-    ([(sign, (1, v))], [])
-  | RConstant x =>
-    ([], [(sign, x)])
-  end.
-
-Definition linearize_raw_term (t : raw_term) : linearized_sign :=
-  linearize_raw_term' t true.
-
-Definition neg_list A (l : list (bool * A)) :=
-  map (fun '(x, y) => (negb x, y)) l.
-
-Definition neg_linearized (t : linearized_sign) : linearized_sign :=
-  let '(l, c) := t in
-  (neg_list l, neg_list c).
-
-Definition sub_linearized (t1 t2 : linearized_sign) : linearized_sign :=
-  let '(l1, c1) := t1 in
-  let '(l2, c2) := t2 in
-  (l1 ++ neg_list l2, c1 ++ neg_list c2).
-
-(* ------------------------------------------------------------------------- *)
-(* Second intermediate representation for terms. *)
+(* Intermediate representation for terms. *)
 
 Notation monoms := (list (ground * var))%type.
-Notation linearized := (monoms * num)%type.
+Notation linearized := (monoms * constant)%type.
 
 (* Its semantics *)
 
@@ -202,27 +135,39 @@ Definition interpret_monoms (env : environment) (l : monoms) : num :=
     acc + k * env v
   ) 0 l.
 
-Definition interpret_linearized (env : environment) '((l, c) : linearized) : num
-:=
-  interpret_monoms env l + c.
+Definition interpret_linearized (cenv env : environment) '((l, c) : linearized)
+: num :=
+  interpret_monoms env l + interpret_constant cenv c.
 
 (* ------------------------------------------------------------------------- *)
-(* Translation from [linearized_sign] to [linearized]. *)
+(* Conversion from a [raw_term] to a [linearized]. *)
 
-Definition monoms_sign_to_monoms (l : monoms_sign) : monoms :=
-  map (fun '(b, (k, v)) => if (b:bool) then (k, v) else (- k, v)) l.
+Definition add_lin (l1 l2 : linearized) :=
+  let '(m1, c1) := l1 in
+  let '(m2, c2) := l2 in
+  (m1 ++ m2, cadd c1 c2).
 
-Definition csts_sign_to_csts (c : csts_sign) : num :=
-  match c with
-  | [] => 0
-  | (b, k) :: c' =>
-    fold_right (fun '(b, x) acc => if (b:bool) then acc + x else acc - x)
-               (if (b:bool) then k else -k) c'
+Definition neg_lin '((m, c) : linearized) :=
+  (map (fun '(k, v) => (-k, v)) m, cneg c).
+
+Definition sub_lin (l1 l2 : linearized) :=
+  add_lin l1 (neg_lin l2).
+
+Fixpoint linearize_raw_term (t : raw_term) : linearized :=
+  match t with
+  | RAdd t1 t2 =>
+    add_lin (linearize_raw_term t1) (linearize_raw_term t2)
+  | RSub t1 t2 =>
+    sub_lin (linearize_raw_term t1) (linearize_raw_term t2)
+  | RMul k v =>
+    ([(k, v)], CGround 0)
+  | ROpp t =>
+    neg_lin (linearize_raw_term t)
+  | RVar v =>
+    ([(1, v)], CGround 0)
+  | RConstant x =>
+    ([], x)
   end.
-
-Definition linearized_sign_to_linearized '((l, c) : linearized_sign): linearized
-:=
-  (monoms_sign_to_monoms l, csts_sign_to_csts c).
 
 (* ------------------------------------------------------------------------- *)
 (* Normalization procedure on [linearized] (the goal is to produce terms that
@@ -282,13 +227,12 @@ Definition linearized_to_term (t : linearized) : term :=
   let '(l, c) := t in
   fold_right (fun '(k, y) acc => TSummand k y acc) (TConstant c) l.
 
-Definition to_term (t : linearized_sign) : term :=
-  let t := linearized_sign_to_linearized t in
+Definition to_term (t : linearized) : term :=
   let t := normalize_linearized t in
   linearized_to_term t.
 
-Definition plus1 '((l, c) : linearized_sign) : linearized_sign :=
-  (l, (true, 1) :: c).
+Definition plus1 '((m, c) : linearized) : linearized :=
+  (m, cadd c (CGround 1)).
 
 Definition raw_predicate_to_atom (p : raw_predicate) : predicate * term :=
   match p with
@@ -303,19 +247,19 @@ Definition raw_predicate_to_atom (p : raw_predicate) : predicate * term :=
     let t2 := linearize_raw_term t2 in
     match p with
     | REq => (* t1 = t2 *)
-      let t := sub_linearized t2 t1 in (* 0 = t2 - t1 *)
+      let t := sub_lin t2 t1 in (* 0 = t2 - t1 *)
       (Eq, to_term t)
     | RLt => (* t1 < t2 *)
-      let t := sub_linearized t2 t1 in (* 0 < t2 - t1 *)
+      let t := sub_lin t2 t1 in (* 0 < t2 - t1 *)
       (Lt, to_term t)
     | RLe => (* t1 <= t2 *)
-      let t := plus1 (sub_linearized t2 t1) in (* 0 < t2 - t1 + 1 *)
+      let t := plus1 (sub_lin t2 t1) in (* 0 < t2 - t1 + 1 *)
       (Lt, to_term t)
     | RGt => (* t1 > t2 *)
-      let t := sub_linearized t1 t2 in (* 0 < t1 - t2 *)
+      let t := sub_lin t1 t2 in (* 0 < t1 - t2 *)
       (Lt, to_term t)
     | RGe => (* t1 >= t2 *)
-      let t := plus1 (sub_linearized t1 t2) in (* 0 < t1 - t2 + 1 *)
+      let t := plus1 (sub_lin t1 t2) in (* 0 < t1 - t2 + 1 *)
       (Lt, to_term t)
     end
   end.
@@ -349,137 +293,52 @@ Hint Rewrite
      Nat.eqb_eq Nat.eqb_neq
      Bool.negb_false_iff Bool.negb_true_iff
      Z.eqb_eq Z.eqb_neq
+     interpret_cadd interpret_cmul interpret_cneg
 : interp.
 
 Ltac interp :=
   simpl; autorewrite with interp in *.
 
-Lemma interpret_monoms_sign_app:
-  forall env l1 l2,
-  interpret_monoms_sign env (l1 ++ l2) =
-  interpret_monoms_sign env l1 + interpret_monoms_sign env l2.
+Lemma interpret_add_lin:
+  forall cenv env l1 l2,
+  interpret_linearized cenv env (add_lin l1 l2) =
+  interpret_linearized cenv env l1 + interpret_linearized cenv env l2.
 Proof.
-  induction l1 as [| [? [? ?]]]; intros; simpl in *; try rewrite IHl1; eauto.
+  destruct l1 as [m1 c1]. destruct l2 as [m2 c2].
+  induction m1 as [| [? ?]]; intros; simpl in *; interp; eauto.
 Qed.
 
-Lemma interpret_csts_sign_app:
-  forall l1 l2,
-  interpret_csts_sign (l1 ++ l2) =
-  interpret_csts_sign l1 + interpret_csts_sign l2.
+Lemma interpret_neg_lin:
+  forall cenv env l,
+  interpret_linearized cenv env (neg_lin l) =
+  - interpret_linearized cenv env l.
 Proof.
-  induction l1 as [| [? ?]]; intros; simpl in *; try rewrite IHl1; eauto.
+  destruct l as [m c].
+  induction m as [| [? ?]]; intros; simpl in *; interp; eauto. nia.
 Qed.
 
-Hint Rewrite
-     interpret_monoms_sign_app
-     interpret_csts_sign_app
-: interp.
-
-Lemma interpret_linearized_sign_app2:
-  forall env t1 t2,
-  interpret_linearized_sign env (t1 ++2 t2) =
-  interpret_linearized_sign env t1 + interpret_linearized_sign env t2.
+Lemma interpret_sub_lin:
+  forall cenv env l1 l2,
+  interpret_linearized cenv env (sub_lin l1 l2) =
+  interpret_linearized cenv env l1 - interpret_linearized cenv env l2.
 Proof.
-  destruct t1 as [l1 c1]. destruct t2 as [l2 c2]. interp. omega.
+  intros; unfold sub_lin; interp. rewrite interpret_add_lin, interpret_neg_lin.
+  omega.
 Qed.
 
-Hint Rewrite interpret_linearized_sign_app2 : interp.
+Hint Rewrite interpret_add_lin interpret_neg_lin interpret_sub_lin : interp.
 
-Lemma sign2num_negb:
-  forall b,
-  sign2num (negb b) = - sign2num b.
-Proof. intros. unfold sign2num. repeat case_if; omega. Qed.
-
-Hint Rewrite sign2num_negb : interp.
-
-Lemma interpret_linearize_raw_term':
-  forall env t sign,
-  interpret_linearized_sign env (linearize_raw_term' t sign) =
-  (sign2num sign) * interpret_raw_term env t.
-Proof.
-  induction t; intros; simpl in *; eauto; interp; try nia.
-  - rewrite IHt1, IHt2. nia.
-  - rewrite IHt1, IHt2. interp. nia.
-  - rewrite IHt. interp. nia.
-Qed.
+Local Arguments Z.mul : simpl nomatch.
 
 Lemma interpret_linearize_raw_term:
-  forall env t,
-  interpret_linearized_sign env (linearize_raw_term t) = interpret_raw_term env t.
+  forall cenv env t,
+  interpret_linearized cenv env (linearize_raw_term t) =
+  interpret_raw_term cenv env t.
 Proof.
-  intros. unfold linearize_raw_term. rewrite interpret_linearize_raw_term'.
-  unfold sign2num. eauto.
+  induction t; intros; simpl in *; eauto; interp; try nia.
 Qed.
 
 Hint Rewrite interpret_linearize_raw_term : interp.
-
-Lemma interpret_monoms_sign_neg:
-  forall env l,
-  interpret_monoms_sign env (neg_list l) =
-  - interpret_monoms_sign env l.
-Proof.
-  induction l as [| [? [? ?]]]; intros; simpl in *; eauto.
-  rewrite IHl, sign2num_negb. nia.
-Qed.
-
-Lemma interpret_csts_sign_neg:
-  forall l,
-  interpret_csts_sign (neg_list l) =
-  - interpret_csts_sign l.
-Proof.
-  induction l as [| [? ?]]; intros; simpl in *; eauto.
-  rewrite IHl, sign2num_negb. nia.
-Qed.
-
-Hint Rewrite interpret_monoms_sign_neg interpret_csts_sign_neg : interp.
-
-Lemma interpret_linearized_sign_neg:
-  forall env t,
-  interpret_linearized_sign env (neg_linearized t) =
-  - interpret_linearized_sign env t.
-Proof. destruct t. interp. nia. Qed.
-
-Hint Rewrite interpret_linearized_sign_neg : interp.
-
-Lemma interpret_linearized_sign_sub:
-  forall env t1 t2,
-  interpret_linearized_sign env (sub_linearized t1 t2) =
-  interpret_linearized_sign env t1 - interpret_linearized_sign env t2.
-Proof. destruct t1, t2. interp. nia. Qed.
-
-Hint Rewrite interpret_linearized_sign_sub : interp.
-
-Arguments Z.mul : simpl nomatch.
-
-Lemma interpret_monoms_sign_to_monoms:
-  forall env l,
-  interpret_monoms env (monoms_sign_to_monoms l) =
-  interpret_monoms_sign env l.
-Proof.
-  induction l as [| [? [? ?]]]; intros; simpl in *; eauto.
-  case_if; rewrite IHl; subst; simpl; nia.
-Qed.
-
-Lemma interpret_csts_sign_to_csts:
-  forall l,
-  csts_sign_to_csts l = interpret_csts_sign l.
-Proof.
-  destruct l as [| [? ?] l]; auto; simpl.
-  induction l as [| [? ?]]; intros; simpl in *; eauto.
-  - case_if; simpl; nia.
-  - case_if; rewrite IHl; simpl; nia.
-Qed.
-
-Hint Rewrite
-  interpret_monoms_sign_to_monoms interpret_csts_sign_to_csts : interp.
-
-Lemma interpret_linearized_sign_to_linearized:
-  forall env t,
-  interpret_linearized env (linearized_sign_to_linearized t) =
-  interpret_linearized_sign env t.
-Proof. destruct t; interp; auto. Qed.
-
-Hint Rewrite interpret_linearized_sign_to_linearized : interp.
 
 Lemma interpret_clear_zeros:
   forall env l,
@@ -521,8 +380,9 @@ Proof.
 Qed.
 
 Lemma interpret_normalize_linearized:
-  forall env t,
-  interpret_linearized env (normalize_linearized t) = interpret_linearized env t.
+  forall cenv env t,
+  interpret_linearized cenv env (normalize_linearized t) =
+  interpret_linearized cenv env t.
 Proof.
   destruct t as [l c]. unfold normalize_linearized. interp.
   rewrite interpret_monoms_permutation with (l1:=l) (l2:=(MonomSort.sort l));
@@ -532,9 +392,9 @@ Qed.
 Hint Rewrite interpret_normalize_linearized : interp.
 
 Lemma interpret_linearized_to_term:
-  forall env t,
-  interpret_term env (linearized_to_term t) =
-  interpret_linearized env t.
+  forall cenv env t,
+  interpret_term cenv env (linearized_to_term t) =
+  interpret_linearized cenv env t.
 Proof.
   destruct t as [l c].
   induction l as [| [? ?]]; intros; simpl in *; eauto.
@@ -543,37 +403,37 @@ Qed.
 Hint Rewrite interpret_linearized_to_term : interp.
 
 Lemma interpret_to_term:
-  forall env t,
-  interpret_term env (to_term t) =
-  interpret_linearized_sign env t.
+  forall cenv env t,
+  interpret_term cenv env (to_term t) =
+  interpret_linearized cenv env t.
 Proof. intros. unfold to_term. now interp. Qed.
 
 Hint Rewrite interpret_to_term : interp.
 
 Lemma interpret_plus1:
-  forall env t,
-  interpret_linearized_sign env (plus1 t) =
-  interpret_linearized_sign env t + 1.
-Proof. destruct t as [? ?]. simpl. lia. Qed.
+  forall cenv env t,
+  interpret_linearized cenv env (plus1 t) =
+  interpret_linearized cenv env t + 1.
+Proof. destruct t as [? ?]. interp. simpl. lia. Qed.
 
 Hint Rewrite interpret_plus1 : interp.
 
 Lemma interpret_raw_predicate_to_atom:
-  forall env p,
+  forall cenv env p,
   let '(p', t) := raw_predicate_to_atom p in
-  interpret_predicate p' (interpret_term env t) <->
-  interpret_raw_predicate env p.
+  interpret_predicate p' (interpret_term cenv env t) <->
+  interpret_raw_predicate cenv env p.
 Proof.
-  intros env p. destruct p as [p1|p2].
+  intros cenv env p. destruct p as [p1|p2].
   { destruct p1. simpl. case_if; interp; subst; try reflexivity.
     split; [ intros <- | intros ]. reflexivity. forwards*: Z.divide_0_l. }
   { destruct p2; interp; lia. }
 Qed.
 
 Lemma interpret_raw_formula_to_formula:
-  forall f env,
-  interpret_formula env (raw_formula_to_formula f) <->
-  interpret_raw_formula env f.
+  forall cenv f env,
+  interpret_formula cenv env (raw_formula_to_formula f) <->
+  interpret_raw_formula cenv env f.
 Proof.
   induction f; intros; interp; [
     repeat match goal with h: forall _:environment, _ |- _ =>
@@ -581,7 +441,7 @@ Proof.
   .. |];
   try tauto.
   - match goal with r:raw_predicate |- _ =>
-      forwards: interpret_raw_predicate_to_atom env r end.
+      forwards: interpret_raw_predicate_to_atom cenv env r end.
     destruct (raw_predicate_to_atom r). eauto.
   - apply exists_equivalence. eauto.
 Qed.
@@ -651,17 +511,20 @@ Proof.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
+
 (* The main theorem used by the tactic *)
 
 Definition empty_env : environment := (fun (n:nat) => 0).
 
-Lemma cooper_qe_theorem (f : raw_formula) :
+Lemma cooper_qe_theorem (cenv : environment) (f : raw_formula) :
   let f' := raw_formula_to_formula f in
   check_wff f' = true ->
-  interpret_formula empty_env (qe f') ->
-  interpret_raw_formula empty_env f.
+  forall qef',
+  qe f' = qef' ->
+  interpret_formula cenv empty_env qef' ->
+  interpret_raw_formula cenv empty_env f.
 Proof.
-  simpl; intros. rewrite interpret_qe in *; interp; auto.
+  simpl; intros. subst qef'. rewrite interpret_qe in *; interp; auto.
   apply~ check_wff_correct.
 Qed.
 
@@ -670,110 +533,163 @@ Qed.
 
 Require Import Template.All.
 
-Ltac reflect_term term cont :=
-  lazymatch term with
-  | tApp (tConst "Coq.ZArith.BinIntDef.Z.add" []) [?x; ?y] =>
-    reflect_term x ltac:(fun t1 =>
-    reflect_term y ltac:(fun t2 =>
-    cont (RAdd t1 t2)))
-  | tApp (tConst "Coq.ZArith.BinIntDef.Z.sub" []) [?x; ?y] =>
-    reflect_term x ltac:(fun t1 =>
-    reflect_term y ltac:(fun t2 =>
-    cont (RSub t1 t2)))
-  | tApp (tConst "Coq.ZArith.BinIntDef.Z.mul" []) [?x; tRel ?v] =>
-    (* TODO: check that x is ground *)
-    denote_term x ltac:(fun k =>
-    cont (RMul k v))
-  | tApp (tConst "Coq.ZArith.BinIntDef.Z.mul" []) [tRel ?v; ?x] =>
-    (* TODO: check that x is ground *)
-    denote_term x ltac:(fun k =>
-    cont (RMul k v))
-  | tApp (tConst "Coq.ZArith.BinIntDef.Z.opp" []) [?x] =>
-    reflect_term x ltac:(fun t =>
-    cont (ROpp t))
-  | tRel ?n =>
-    cont (RVar n)
-  | ?x =>
-    denote_term x ltac:(fun c => cont (RConstant c))
+Fixpoint nthZ (n : nat) (l : list num) : num :=
+  match l with
+  | [] => 0
+  | x :: xs =>
+    match n with
+    | O => x
+    | S n' => nthZ n' xs
+    end
   end.
 
-Ltac reflect_predicate term cont :=
+Ltac is_ground_positive term :=
+  lazymatch term with
+  | tConstruct {| inductive_mind := "Coq.Numbers.BinNums.positive";
+                  inductive_ind := _ |} _ [] =>
+    idtac
+  | tApp ?x [?y] =>
+    is_ground_positive x;
+    is_ground_positive y
+  end.
+
+Ltac is_ground_Z term :=
+  lazymatch term with
+  | tConstruct {| inductive_mind := "Coq.Numbers.BinNums.Z";
+                  inductive_ind := _ |} _ [] =>
+    idtac
+  | tApp ?x [?pos] =>
+    is_ground_Z x;
+    is_ground_positive pos
+  end.
+
+Ltac reflect_term term csts cid cont :=
+  lazymatch term with
+  | tApp (tConst "Coq.ZArith.BinIntDef.Z.add" []) [?x; ?y] =>
+    reflect_term x csts cid ltac:(fun t1 csts cid =>
+    reflect_term y csts cid ltac:(fun t2 csts cid =>
+    cont (RAdd t1 t2) csts cid))
+  | tApp (tConst "Coq.ZArith.BinIntDef.Z.sub" []) [?x; ?y] =>
+    reflect_term x csts cid ltac:(fun t1 csts cid =>
+    reflect_term y csts cid ltac:(fun t2 csts cid =>
+    cont (RSub t1 t2) csts cid))
+  | tApp (tConst "Coq.ZArith.BinIntDef.Z.mul" []) [?x; tRel ?v] =>
+    tryif is_ground_Z x then (
+      denote_term x ltac:(fun k =>
+      cont (RMul k v) csts cid)
+    ) else fail 100 "Multiplicative constants must be concrete terms"
+  | tApp (tConst "Coq.ZArith.BinIntDef.Z.mul" []) [tRel ?v; ?x] =>
+    tryif is_ground_Z x then (
+      denote_term x ltac:(fun k =>
+      cont (RMul k v) csts cid)
+    ) else fail 100 "Multiplicative constants must be concrete terms"
+  | tApp (tConst "Coq.ZArith.BinIntDef.Z.opp" []) [?x] =>
+    reflect_term x csts cid ltac:(fun t csts cid =>
+    cont (ROpp t) csts cid)
+  | tRel ?n =>
+    cont (RVar n) csts cid
+  | ?x =>
+    denote_term x ltac:(fun k =>
+      tryif is_ground_Z x then
+        cont (RConstant (CGround k)) csts cid
+      else
+        cont (RConstant (CAbstract cid)) (k::csts) (S cid)
+    )
+  end.
+
+Ltac reflect_predicate term csts cid cont :=
   lazymatch term with
   | tApp (tInd {| inductive_mind := "Coq.Init.Logic.eq"; inductive_ind := 0 |} [])
       [tInd {| inductive_mind := "Coq.Numbers.BinNums.Z"; inductive_ind := 0 |} [];
        ?x; ?y] =>
-    reflect_term x ltac:(fun t1 =>
-    reflect_term y ltac:(fun t2 =>
-    cont (RPred2 REq t1 t2)))
+    reflect_term x csts cid ltac:(fun t1 csts cid =>
+    reflect_term y csts cid ltac:(fun t2 csts cid =>
+    cont (RPred2 REq t1 t2) csts cid))
   | tApp (tConst "Coq.ZArith.BinInt.Z.lt" []) [?x; ?y] =>
-    reflect_term x ltac:(fun t1 =>
-    reflect_term y ltac:(fun t2 =>
-    cont (RPred2 RLt t1 t2)))
+    reflect_term x csts cid ltac:(fun t1 csts cid =>
+    reflect_term y csts cid ltac:(fun t2 csts cid =>
+    cont (RPred2 RLt t1 t2) csts cid))
   | tApp (tConst "Coq.ZArith.BinInt.Z.le" []) [?x; ?y] =>
-    reflect_term x ltac:(fun t1 =>
-    reflect_term y ltac:(fun t2 =>
-    cont (RPred2 RLe t1 t2)))
+    reflect_term x csts cid ltac:(fun t1 csts cid =>
+    reflect_term y csts cid ltac:(fun t2 csts cid =>
+    cont (RPred2 RLe t1 t2) csts cid))
   | tApp (tConst "Coq.ZArith.BinInt.Z.gt" []) [?x; ?y] =>
-    reflect_term x ltac:(fun t1 =>
-    reflect_term y ltac:(fun t2 =>
-    cont (RPred2 RGt t1 t2)))
+    reflect_term x csts cid ltac:(fun t1 csts cid =>
+    reflect_term y csts cid ltac:(fun t2 csts cid =>
+    cont (RPred2 RGt t1 t2) csts cid))
   | tApp (tConst "Coq.ZArith.BinInt.Z.ge" []) [?x; ?y] =>
-    reflect_term x ltac:(fun t1 =>
-    reflect_term y ltac:(fun t2 =>
-    cont (RPred2 RGe t1 t2)))
+    reflect_term x csts cid ltac:(fun t1 csts cid =>
+    reflect_term y csts cid ltac:(fun t2 csts cid =>
+    cont (RPred2 RGe t1 t2) csts cid))
   | tApp (tConst "Coq.ZArith.BinInt.Z.divide" []) [?x; ?y] =>
-    (* TODO: check that x is ground *)
-    denote_term x ltac:(fun c =>
-    reflect_term y ltac:(fun t =>
-    cont (RPred1 (RDv c) t)))
+    tryif is_ground_Z x then (
+      denote_term x ltac:(fun c =>
+      reflect_term y csts cid ltac:(fun t csts cid =>
+      cont (RPred1 (RDv c) t) csts cid))
+    ) else fail 100 "Divisibility can only be by concrete constants"
   end.
 
-Ltac reflect_formula term cont :=
+Ltac reflect_formula term csts cid cont :=
   lazymatch term with
   | tInd {| inductive_mind := "Coq.Init.Logic.False"; inductive_ind := 0 |} [] =>
-    cont RFalse
+    cont RFalse csts cid
   | tInd {| inductive_mind := "Coq.Init.Logic.True"; inductive_ind := 0 |} [] =>
-    cont RTrue
+    cont RTrue csts cid
   | tApp (tInd {| inductive_mind := "Coq.Init.Logic.and"; inductive_ind := 0 |} [])
          [?P; ?Q] =>
-    reflect_formula P ltac:(fun f1 =>
-    reflect_formula Q ltac:(fun f2 =>
-    cont (RAnd f1 f2)))
+    reflect_formula P csts cid ltac:(fun f1 csts cid =>
+    reflect_formula Q csts cid ltac:(fun f2 csts cid =>
+    cont (RAnd f1 f2) csts cid))
   | tApp (tInd {| inductive_mind := "Coq.Init.Logic.or"; inductive_ind := 0 |} [])
          [?P; ?Q] =>
-    reflect_formula P ltac:(fun f1 =>
-    reflect_formula Q ltac:(fun f2 =>
-    cont (ROr f1 f2)))
-  | tApp (tInd {| inductive_mind := "Coq.Init.Logic.not"; inductive_ind := 0 |} [])
-         [?P] =>
-    reflect_formula P ltac:(fun f =>
-    cont (RNot f))
+    reflect_formula P csts cid ltac:(fun f1 csts cid =>
+    reflect_formula Q csts cid ltac:(fun f2 csts cid =>
+    cont (ROr f1 f2) csts cid))
+  | tApp (tConst "Coq.Init.Logic.not" []) [?P] =>
+    reflect_formula P csts cid ltac:(fun f csts cid =>
+    cont (RNot f) csts cid)
   | tApp (tInd {| inductive_mind := "Coq.Init.Logic.ex"; inductive_ind := 0 |} [])
          [tInd {| inductive_mind := "Coq.Numbers.BinNums.Z"; inductive_ind := 0 |} [];
           tLambda _ _ ?body] =>
-    reflect_formula body ltac:(fun f =>
-    cont (RExists f))
+    reflect_formula body csts cid ltac:(fun f csts cid =>
+    cont (RExists f) csts cid)
   | ?f =>
-    reflect_predicate f ltac:(fun p =>
-    cont (RAtom p))
+    reflect_predicate f csts cid ltac:(fun p csts cid =>
+    cont (RAtom p) csts cid)
   end.
+
+Fixpoint myrev (l l' : list num) : list num :=
+  match l with
+  | [] => l'
+  | x :: xs => myrev xs (x :: l')
+  end.
+
+Ltac mkcenv csts :=
+  let csts := eval cbv [myrev] in (myrev csts []) in
+  constr:(fun n => nthZ n csts).
 
 Ltac qe :=
   match goal with |- ?X => quote_term X ltac:(fun tm =>
-    reflect_formula tm ltac:(fun f =>
-      apply (@cooper_qe_theorem f); [
-        reflexivity
-      |
-      (* cbv -[Z.add Z.sub Z.opp Z.mul Z.le Z.ge Z.gt Z.lt Z.divide] *)
-      (* Does not work because we need to compute with eg Z.mul.
-         TODO: introduce aliases for the blacklist *)
-      (* TODO: use cbv instead of simpl which seems to be much faster *)
-        simpl
+    reflect_formula tm ([]:list num) 0%nat ltac:(fun f csts _ =>
+      let cenv := mkcenv csts in
+      eapply (@cooper_qe_theorem cenv f); [
+        cbv; reflexivity
+      | cbv; reflexivity
+      | cbv [interpret_formula interpret_predicate
+             interpret_term interpret_constant nthZ]
       ]
     )
   ) end.
 
 Goal exists x, 0 <= 2 * x + 5 \/ x > 3.
-  Fail lia.
-  qe. lia.
+  qe. cbn. lia.
 Qed.
+
+Goal forall a, exists x, a <= x /\ x < a + 1.
+  intro. qe.
+  lia.
+Qed.
+
+Goal forall a b, ~ (exists x, ~(~ (b < x) \/ a <= x)).
+  intros. qe.
+Abort.

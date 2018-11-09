@@ -97,22 +97,94 @@ Definition enveq (env1 env2 : environment) : Prop :=
   forall x, env1 x = env2 x.
 
 (* ------------------------------------------------------------------------- *)
+(* Constants can be a combination of numeric literals and arbitrary expressions
+   (that are treated as abstract and kept in an environment). *)
+
+Inductive constant :=
+| CAdd: constant -> constant -> constant
+| CMul: constant -> constant -> constant
+| CGround: Z -> constant
+| CAbstract: var -> constant.
+
+Fixpoint interpret_constant (cenv : environment) (c : constant) : num :=
+  match c with
+  | CAdd c1 c2 =>
+    (interpret_constant cenv c1) + (interpret_constant cenv c2)
+  | CMul c1 c2 =>
+    (interpret_constant cenv c1) * (interpret_constant cenv c2)
+  | CGround k =>
+    k
+  | CAbstract v =>
+    cenv v
+  end.
+
+Function cadd (c1 c2 : constant) : constant :=
+  match (c1, c2) with
+  | (CGround k1, CGround k2) =>
+    CGround (k1 + k2)
+  | (CGround 0, _) =>
+    c2
+  | (_, CGround 0) =>
+    c1
+  | (_, _) =>
+    CAdd c1 c2
+  end.
+
+Lemma interpret_cadd:
+  forall cenv c1 c2,
+  interpret_constant cenv (cadd c1 c2) =
+  interpret_constant cenv c1 + interpret_constant cenv c2.
+Proof.
+  intros. functional induction (cadd c1 c2); simpl in *; eauto.
+Qed.
+
+Function cmul (c1 c2 : constant) : constant :=
+  match (c1, c2) with
+  | (CGround k1, CGround k2) =>
+    CGround (k1 * k2)
+  | (CGround 1, _) =>
+    c2
+  | (_, CGround 1) =>
+    c1
+  | (_, _) =>
+    CMul c1 c2
+  end.
+
+Local Arguments Z.mul : simpl nomatch.
+
+Lemma interpret_cmul:
+  forall cenv c1 c2,
+  interpret_constant cenv (cmul c1 c2) =
+  interpret_constant cenv c1 * interpret_constant cenv c2.
+Proof.
+  intros. functional induction (cmul c1 c2); simpl in *; eauto.
+Qed.
+
+Definition cneg (c : constant) : constant :=
+  cmul (CGround (-1)) c.
+
+Lemma interpret_cneg:
+  forall cenv c,
+  interpret_constant cenv (cneg c) = - interpret_constant cenv c.
+Proof. intros. unfold cneg. rewrite interpret_cmul. eauto. Qed.
+
+(* ------------------------------------------------------------------------- *)
 
 (* A term is a sum of summands of the form [k.x], where [k] is a constant and
    [x] is a variable, and of a final constant. *)
 
 Inductive term :=
 | TSummand: num -> var -> term -> term
-| TConstant: num -> term.
+| TConstant: constant -> term.
 
 (* The logical interpretation of a term. *)
 
-Fixpoint interpret_term (env : environment) (t : term) : num :=
+Fixpoint interpret_term (cenv env : environment) (t : term) : num :=
   match t with
   | TSummand k y u =>
-      k * env y + interpret_term env u
-  | TConstant k =>
-      k
+      k * env y + interpret_term cenv env u
+  | TConstant c =>
+      interpret_constant cenv c
   end.
 
 (* A term is well-formed if its coefficients are non-zero and its variables
@@ -149,11 +221,11 @@ Fixpoint mul_nonzero (n : num) (t : term) : term :=
   | TSummand k x u =>
       TSummand (n * k) x (mul_nonzero n u)
   | TConstant k =>
-      TConstant (n * k)
+      TConstant (cmul (CGround n) k)
   end.
 
 Definition mul (n : num) (t : term) : term :=
-  if Z.eq_dec n 0 then TConstant 0 else mul_nonzero n t.
+  if Z.eq_dec n 0 then TConstant (CGround 0) else mul_nonzero n t.
 
 Lemma wf_mul_nonzero:
   forall n,
@@ -174,15 +246,15 @@ Proof.
 Qed.
 
 Lemma interpret_mul_nonzero:
-  forall env n t,
-  interpret_term env (mul_nonzero n t) = n * interpret_term env t.
+  forall cenv env n t,
+  interpret_term cenv env (mul_nonzero n t) = n * interpret_term cenv env t.
 Proof.
-  induction t; simpl; auto. rewrite IHt. ring.
+  induction t; simpl; auto. rewrite IHt. ring. now rewrite interpret_cmul.
 Qed.
 
 Lemma interpret_mul:
-  forall env n t,
-  interpret_term env (mul n t) = n * interpret_term env t.
+  forall cenv env n t,
+  interpret_term cenv env (mul n t) = n * interpret_term cenv env t.
 Proof.
   intros. unfold mul. destruct (Z.eq_dec n 0).
   subst. simpl. auto.
@@ -205,8 +277,8 @@ Proof.
 Qed.
 
 Lemma interpret_neg:
-  forall env t,
-  interpret_term env (neg t) = -(interpret_term env t).
+  forall cenv env t,
+  interpret_term cenv env (neg t) = -(interpret_term cenv env t).
 Proof.
   unfold neg. intros. rewrite interpret_mul. ring.
 Qed.
@@ -244,7 +316,7 @@ Fixpoint add (t1 t2 : term) : term :=
     | TConstant _, TSummand k2 x2 u2 =>
         TSummand k2 x2 (add_t1 u2)
     | TConstant k1, TConstant k2 =>
-        TConstant (k1 + k2)
+        TConstant (cadd k1 k2)
     end
   in
   add_t1 t2.
@@ -278,9 +350,9 @@ Proof.
 Qed.
 
 Lemma interpret_add:
-  forall env t1 t2,
-  interpret_term env (add t1 t2) =
-  interpret_term env t1 + interpret_term env t2.
+  forall cenv env t1 t2,
+  interpret_term cenv env (add t1 t2) =
+  interpret_term cenv env t1 + interpret_term cenv env t2.
 Proof.
   induction t1 as [ k1 x1 u1 | k1 ];
   induction t2 as [ k2 x2 u2 | k2 ];
@@ -305,7 +377,7 @@ Proof.
   (* Case TConstant/TSummand. *)
   simpl in *. rewrite IHu2. ring.
   (* Case TConstant/TConstant. *)
-  ring.
+  rewrite interpret_cadd. ring.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
@@ -325,9 +397,9 @@ Proof.
 Qed.
 
 Lemma interpret_sub:
-  forall env t1 t2,
-  interpret_term env (sub t1 t2) =
-  interpret_term env t1 - interpret_term env t2.
+  forall cenv env t1 t2,
+  interpret_term cenv env (sub t1 t2) =
+  interpret_term cenv env t1 - interpret_term cenv env t2.
 Proof.
   intros. unfold sub. rewrite interpret_add. rewrite interpret_neg. ring.
 Qed.
@@ -366,10 +438,10 @@ Qed.
    [t] does not depend upon the interpretation of this variable. *)
 
 Lemma extend_insensitive:
-  forall env n1 n2 x t,
+  forall cenv env n1 n2 x t,
   wft x t ->
   (x > 0)%nat ->
-  interpret_term (extend env n1) t = interpret_term (extend env n2) t.
+  interpret_term cenv (extend env n1) t = interpret_term cenv (extend env n2) t.
 Proof.
   induction 1; intros; simpl; auto.
   rewrite IHwft; eauto. erewrite extend_env_other; eauto.
@@ -402,10 +474,10 @@ Qed.
    [t] is not affected by this change of variables. *)
 
 Lemma adjust_insensitive:
-  forall l env x t,
+  forall cenv l env x t,
   wft x t ->
   (x > 0)%nat ->
-  interpret_term (adjust_env l env) t = interpret_term env t.
+  interpret_term cenv (adjust_env l env) t = interpret_term cenv env t.
 Proof.
   induction 1; intros; simpl; auto.
   rewrite IHwft; eauto. rewrite adjust_env_other; eauto.
@@ -442,22 +514,22 @@ Definition interpret_predicate (p : predicate) (t : num) : Prop :=
       (d | t)
   end.
 
-Fixpoint interpret_formula env (f : formula) : Prop :=
+Fixpoint interpret_formula cenv env (f : formula) : Prop :=
   match f with
   | FAtom p t =>
-      interpret_predicate p (interpret_term env t)
+      interpret_predicate p (interpret_term cenv env t)
   | FFalse =>
       False
   | FTrue =>
       True
   | FAnd f1 f2 =>
-      interpret_formula env f1 /\ interpret_formula env f2
+      interpret_formula cenv env f1 /\ interpret_formula cenv env f2
   | FOr f1 f2 =>
-      interpret_formula env f1 \/ interpret_formula env f2
+      interpret_formula cenv env f1 \/ interpret_formula cenv env f2
   | FNot f =>
-      ~ interpret_formula env f
+      ~ interpret_formula cenv env f
   | FExists f =>
-      exists z, interpret_formula (extend env z) f
+      exists z, interpret_formula cenv (extend env z) f
   end.
 
 (* A definition of the predicate ``all atoms in the (quantifier-free) formula
@@ -558,18 +630,18 @@ Notation wff :=
    equality of environments. *)
 
 Lemma interpret_term_extensional:
-  forall env1 env2,
+  forall cenv env1 env2,
   enveq env1 env2 ->
   forall t,
-  interpret_term env1 t = interpret_term env2 t.
+  interpret_term cenv env1 t = interpret_term cenv env2 t.
 Proof.
   induction t; simpl; congruence.
 Qed.
 
 Lemma interpret_formula_extensional:
-  forall f env1 env2,
+  forall cenv f env1 env2,
   enveq env1 env2 ->
-  ( interpret_formula env1 f <-> interpret_formula env2 f ).
+  ( interpret_formula cenv env1 f <-> interpret_formula cenv env2 f ).
 Proof.
   induction f; intros; simpl; try tauto.
   (* Case: [FAtom]. *)
@@ -668,9 +740,9 @@ Definition conjunction f1 f2 :=
   end.
 
 Lemma interpret_conjunction:
-  forall env f1 f2,
-  interpret_formula env (conjunction f1 f2) <->
-  interpret_formula env f1 /\ interpret_formula env f2.
+  forall cenv env f1 f2,
+  interpret_formula cenv env (conjunction f1 f2) <->
+  interpret_formula cenv env f1 /\ interpret_formula cenv env f2.
 Proof.
   intros. unfold conjunction. destruct f1; destruct f2; simpl; tauto.
 Qed.
@@ -710,9 +782,9 @@ Definition disjunction f1 f2 :=
   end.
 
 Lemma interpret_disjunction:
-  forall env f1 f2,
-  interpret_formula env (disjunction f1 f2) <->
-  interpret_formula env f1 \/ interpret_formula env f2.
+  forall cenv env f1 f2,
+  interpret_formula cenv env (disjunction f1 f2) <->
+  interpret_formula cenv env f1 \/ interpret_formula cenv env f2.
 Proof.
   intros. unfold disjunction. destruct f1; destruct f2; simpl; tauto.
 Qed.
@@ -752,8 +824,8 @@ Definition negation f :=
   end.
 
 Lemma interpret_negation:
-  forall env f,
-  interpret_formula env (negation f) <-> ~ interpret_formula env f.
+  forall cenv env f,
+  interpret_formula cenv env (negation f) <-> ~ interpret_formula cenv env f.
 Proof.
   (* Note: The elimination of double negation requires classical reasoning. *)
   intros. unfold negation. destruct f; simpl; tauto.
@@ -778,9 +850,9 @@ Definition big_or A (P : A -> Prop) (l : list A) : Prop :=
   fold_right (fun x Q => P x \/ Q) False l.
 
 Lemma interpret_big_disjunction:
-  forall A env (F : A -> formula) l,
-  interpret_formula env (big_disjunction F l) <->
-  big_or (fun x => interpret_formula env (F x)) l.
+  forall A cenv env (F : A -> formula) l,
+  interpret_formula cenv env (big_disjunction F l) <->
+  big_or (fun x => interpret_formula cenv env (F x)) l.
 Proof.
   induction l; simpl; try tauto.
   rewrite interpret_disjunction. tauto.
@@ -844,16 +916,17 @@ Qed.
 
 (* Or we could setup rewriting under [big_or]... *)
 Lemma interpret_big_disjunction2:
-  forall A B env (F : A -> B -> formula) l1 l2,
-  interpret_formula env
+  forall A B cenv env (F : A -> B -> formula) l1 l2,
+  interpret_formula cenv env
     (big_disjunction (fun x => big_disjunction (F x) l1) l2) <->
-  big_or (fun x => big_or (fun y => interpret_formula env (F x y)) l1) l2.
+  big_or (fun x => big_or (fun y => interpret_formula cenv env (F x y)) l1) l2.
 Proof.
   intros. rewrite interpret_big_disjunction. apply big_or_extens.
   intros. rewrite interpret_big_disjunction. reflexivity.
 Qed.
 
 (* Intervals, to use as support for [big_disjunction] and [big_or]. *)
+(* TODO: use [seq] instead *)
 
 (* The interval of 0 (included) to n (excluded): [0, n). *)
 
@@ -924,18 +997,18 @@ with negnnf (f : formula) : formula :=
       (* Negated inequalities are not permitted by our assumptions.
          Reverse them. The atom [~(0 < t)] can be transformed into
          [0 < 1 - t]. *)
-      FAtom Lt (sub (TConstant 1) t)
+      FAtom Lt (sub (TConstant (CGround 1)) t)
   | FAtom _ _
   | FExists _ =>
       FNot f
   end.
 
 Lemma interpret_posnnf:
-  forall env f,
-  interpret_formula env (posnnf f) <-> interpret_formula env f
+  forall cenv env f,
+  interpret_formula cenv env (posnnf f) <-> interpret_formula cenv env f
 with interpret_negnnf:
-  forall env f,
-  interpret_formula env (negnnf f) <-> ~ interpret_formula env f.
+  forall cenv env f,
+  interpret_formula cenv env (negnnf f) <-> ~ interpret_formula cenv env f.
 Proof.
   (* Proof of the first lemma. *)
   induction f; simpl; try tauto. auto.
@@ -943,11 +1016,11 @@ Proof.
   induction f; try predicate; simpl; try tauto.
     (* Case: [Lt] atoms. *)
     rewrite interpret_sub.
-    simpl (interpret_term env (TConstant 1)).
+    simpl (interpret_term cenv env (TConstant (CGround 1))).
     omega. (* cool *)
     (* Case: [FNot]. Again, classical reasoning is required. *)
     split.
-    specializes interpret_posnnf env f.
+    specializes interpret_posnnf cenv env f.
     intro. apply <- interpret_posnnf. tauto.
 Qed.
 
@@ -1204,10 +1277,11 @@ Opaque Zmult.
 Lemma interpret_adjust:
   forall l,
   l <> 0 ->
-  forall env f,
+  forall cenv env f,
   all (dvx l) f ->
   wff f ->
-  interpret_formula (adjust_env l env) (adjust l f) <-> interpret_formula env f.
+  interpret_formula cenv (adjust_env l env) (adjust l f) <->
+  interpret_formula cenv env f.
 Proof.
   (* All cases but [FAtom] are trivial. *)
   induction 2; intros; all; simpl; try tauto.
@@ -1239,10 +1313,10 @@ Qed.
 Lemma interpret_adjust_formula_lcm:
   forall f,
   wff f ->
-  forall env,
-  interpret_formula (adjust_env (formula_lcm f) env)
+  forall cenv env,
+  interpret_formula cenv (adjust_env (formula_lcm f) env)
     (adjust (formula_lcm f) f) <->
-  interpret_formula env f.
+  interpret_formula cenv env f.
 Proof.
   intros.
   eapply interpret_adjust.
@@ -1352,13 +1426,13 @@ Definition unity (f : formula) : formula :=
   else
     FAnd
       f
-      (FAtom (Dv l) (TSummand 1 0 (TConstant 0))).
+      (FAtom (Dv l) (TSummand 1 0 (TConstant (CGround 0)))).
 
 (* This transformation is meaning-preserving. *)
 
 Lemma interpret_formula_adjust_env_1:
-  forall env f,
-  interpret_formula env f <-> interpret_formula (adjust_env 1 env) f.
+  forall cenv env f,
+  interpret_formula cenv env f <-> interpret_formula cenv (adjust_env 1 env) f.
 Proof.
   intros. eapply interpret_formula_extensional.
   intros [ | ]; simpl; intros; ring.
@@ -1371,16 +1445,16 @@ Lemma exists_equivalence:
 Proof. firstorder. Qed.
 
 Lemma interpret_unity:
-  forall env f,
+  forall cenv env f,
   wff f ->
-  interpret_formula env (FExists f) <->
-  interpret_formula env (FExists (unity f)).
+  interpret_formula cenv env (FExists f) <->
+  interpret_formula cenv env (FExists (unity f)).
 Proof.
   intros. unfold unity. simpl.
   destruct (Z.eq_dec (formula_lcm f) 1) as [ eq | _ ].
   (* Case: [formula_lcm f] is 1. No change of variables is required. *)
   eapply exists_equivalence; intro.
-  rewrite (@interpret_formula_adjust_env_1 _ (adjust _ _)).
+  rewrite (@interpret_formula_adjust_env_1 _ _ (adjust _ _)).
   rewrite <- eq.
   rewrite interpret_adjust_formula_lcm; eauto.
   tauto.
@@ -1609,12 +1683,12 @@ Function minusinf (f : formula) : formula :=
 (* For sufficiently large negative [x], [f] and [minusinf f] are equivalent. *)
 
 Lemma interpret_minusinf:
-  forall env f,
+  forall cenv env f,
   all normal f ->
   exists y,
   forall x, x < y ->
-  interpret_formula (extend env x) f <->
-  interpret_formula (extend env x) (minusinf f).
+  interpret_formula cenv (extend env x) f <->
+  interpret_formula cenv (extend env x) (minusinf f).
 Proof.
   induction 1; simpl; try solve [ exists 0; tauto ].
   (* Case [FAtom]. *)
@@ -1624,15 +1698,15 @@ Proof.
   subst; simpl.
   (* Sub-case: an atom [0 = x + t]. This equality cannot be satisfied
      as [x] tends towards minus infinity. *)
-  exists (- interpret_term (extend env 0) t). intros.
+  exists (- interpret_term cenv (extend env 0) t). intros.
   erewrite extend_insensitive with (n2 := 0). lia. eassumption. lia.
   (* Sub-case: an atom [0 < -x + t]. This equality is satisfied
      as [x] tends towards minus infinity. *)
-  exists (interpret_term (extend env 0) t). intros.
+  exists (interpret_term cenv (extend env 0) t). intros.
   erewrite extend_insensitive with (n2 := 0). lia. eassumption. lia.
   (* Sub-case: an atom [0 < x + t]. This equality cannot be satisfied
      as [x] tends towards minus infinity. *)
-  exists (- interpret_term (extend env 0) t). intros.
+  exists (- interpret_term cenv (extend env 0) t). intros.
   erewrite extend_insensitive with (n2 := 0). lia. eassumption. lia.
   (* Case [FAnd]. *)
   destruct IHall1 as [ y1 ih1 ].
@@ -1687,13 +1761,13 @@ Proof.
 Qed.
 
 Lemma sink_minusinf_equiv:
-  forall env f,
+  forall cenv env f,
   all normal f ->
-  sink (fun x => interpret_formula (extend env x) f) <->
-  sink (fun x => interpret_formula (extend env x) (minusinf f)).
+  sink (fun x => interpret_formula cenv (extend env x) f) <->
+  sink (fun x => interpret_formula cenv (extend env x) (minusinf f)).
 Proof.
   introv Hn.
-  forwards [y0 Hy0]: interpret_minusinf env Hn.
+  forwards [y0 Hy0]: interpret_minusinf cenv env Hn.
   split.
   { intros H x. forwards H': H (Z.min x y0). destruct H' as [y' [? ?]].
     exists y'. rewrite <-Hy0 by lia. split~. lia. }
@@ -1787,13 +1861,13 @@ Qed.
    [k]. *)
 
 Lemma interpret_minusinf_modulo_dvdvx:
-  forall env f x k D,
+  forall cenv env f x k D,
   wff f ->
   all (dvdvx D) f ->
-  interpret_formula (extend env x) (minusinf f) <->
-  interpret_formula (extend env (x + k * D)) (minusinf f).
+  interpret_formula cenv (extend env x) (minusinf f) <->
+  interpret_formula cenv (extend env (x + k * D)) (minusinf f).
 Proof.
-  intros env f.
+  intros cenv env f.
   functional induction (minusinf f); intros; simpl; try tauto.
   { predicate; term; wff; wff; wft; simpl in *; try tauto;
     try solve [ erewrite extend_insensitive by eauto; reflexivity ].
@@ -1816,10 +1890,10 @@ Proof.
 Qed.
 
 Lemma interpret_minusinf_modulo_divlcm:
-  forall env f x k,
+  forall cenv env f x k,
   wff f ->
-  interpret_formula (extend env x) (minusinf f) <->
-  interpret_formula (extend env (x + k * (divlcm f))) (minusinf f).
+  interpret_formula cenv (extend env x) (minusinf f) <->
+  interpret_formula cenv (extend env (x + k * (divlcm f))) (minusinf f).
 Proof.
   intros. apply~ interpret_minusinf_modulo_dvdvx.
   apply~ all_dvdvx_divlcm.
@@ -1893,16 +1967,16 @@ Fixpoint subst (t : term) (f : formula) : formula :=
   end.
 
 Lemma interpret_subst:
-  forall env f t u,
+  forall cenv env f t u,
   wff f ->
-  interpret_formula (extend env u) (subst t f) <->
-  interpret_formula (extend env (interpret_term (extend env u) t)) f.
+  interpret_formula cenv (extend env u) (subst t f) <->
+  interpret_formula cenv (extend env (interpret_term cenv (extend env u) t)) f.
 Proof.
   induction 1; simpl; try tauto.
   term; wff; wft; simpl in *.
   rewrite interpret_add, interpret_mul.
-  erewrite extend_insensitive with (n1:=interpret_term (extend env u) t) (n2:=u)
-    by eauto.
+  erewrite extend_insensitive with
+    (n1:=interpret_term cenv (extend env u) t) (n2:=u) by eauto.
   tauto.
   erewrite extend_insensitive. reflexivity. eauto. eauto.
   tauto.
@@ -1966,9 +2040,9 @@ Proof.
 Qed.
 
 Lemma interpret_shift_term:
-  forall env t x,
+  forall cenv env t x,
   wft 1 t ->
-  interpret_term (extend env x) t = interpret_term env (shift_term t).
+  interpret_term cenv (extend env x) t = interpret_term cenv env (shift_term t).
 Proof.
   induction t; intros; simpl in *; auto.
   wft. rewrite IHt. now destruct n.
@@ -1992,9 +2066,10 @@ Fixpoint shift (f : formula) : formula :=
   end.
 
 Lemma interpret_shift:
-  forall env f x,
+  forall cenv env f x,
   wff1 f ->
-  interpret_formula env (shift f) <-> interpret_formula (extend env x) f.
+  interpret_formula cenv env (shift f) <->
+  interpret_formula cenv (extend env x) f.
 Proof.
   induction 1; simpl in *; try tauto.
   wff. rewrite~ interpret_shift_term. tauto.
@@ -2020,20 +2095,20 @@ Qed.
 
 (* Quantifier elimination for formulas, in the "sink" case. *)
 
-Notation sink_interpret env f :=
-  (sink (fun x => interpret_formula (extend env x) f)).
+Notation sink_interpret cenv env f :=
+  (sink (fun x => interpret_formula cenv (extend env x) f)).
 
-Notation sink_interpret_qe env f := (
-  interpret_formula env (
-    big_disjunction (fun i => subst (TConstant i) (minusinf f))
+Notation sink_interpret_qe cenv env f := (
+  interpret_formula cenv env (
+    big_disjunction (fun i => subst (TConstant (CGround i)) (minusinf f))
       (interval (divlcm f))
   )
 ).
 
 Lemma sink_qe:
-  forall env f u,
+  forall cenv env f u,
   all normal f ->
-  sink_interpret env f <-> sink_interpret_qe (extend env u) f.
+  sink_interpret cenv env f <-> sink_interpret_qe cenv (extend env u) f.
 Proof.
   intros. rewrite~ sink_minusinf_equiv.
   rewrite sink_equiv_big_or with (D := divlcm f); cycle 1.
@@ -2063,7 +2138,7 @@ Function bset (f : formula) : list term :=
     (* [c] = 1 *)
     (* The atom is [0 <> x + u]. This changes from true to false when [x] is
        [-u+1]. *)
-    [ add (neg u) (TConstant 1) ]
+    [ add (neg u) (TConstant (CGround 1)) ]
   | FAtom Eq (TSummand c 0 u) =>
     (* [c] = 1 *)
     (* The atom is [0 = x + u]. This changes from true to false when [x] is
@@ -2073,7 +2148,7 @@ Function bset (f : formula) : list term :=
     if Z.eqb c 1 then
       (* The atom is [0 < x + u]. This changes from true to false when [x] is
          [-u+1]. *)
-      [ add (neg u) (TConstant 1) ]
+      [ add (neg u) (TConstant (CGround 1)) ]
     else
       (* [c] = -1 *)
       []
@@ -2114,24 +2189,24 @@ Proof.
 Qed.
 
 Lemma bset_correct:
-  forall env f D x u,
+  forall cenv env f D x u,
   all normal f ->
   nnf f ->
   0 < D ->
   all (dvdvx D) f ->
-  interpret_formula (extend env x) f ->
-  ~ interpret_formula (extend env (x - D)) f ->
+  interpret_formula cenv (extend env x) f ->
+  ~ interpret_formula cenv (extend env (x - D)) f ->
   exists b j,
-    x = interpret_term (extend env u) b + j /\
+    x = interpret_term cenv (extend env u) b + j /\
     In b (bset f) /\
     0 <= j < D.
 Proof.
-  intros env f.
+  intros cenv env f.
   functional induction (bset f); intros; simpl in *;
     repeat all; unfold normal in *; unpack.
   { (* Atom [0 <> x + u] *)
     subst c. rewrite Z.mul_1_l in *. classical.
-    exists (add (neg u) (TConstant 1)). (* b = -u+1 *)
+    exists (add (neg u) (TConstant (CGround 1))). (* b = -u+1 *)
     exists (D - 1). (* j = D-1 *)
     rewrite interpret_add, interpret_neg. simpl.
     erewrite extend_insensitive with (n2:=x); eauto.
@@ -2145,12 +2220,12 @@ Proof.
     rewrite interpret_neg. eauto with zarith. }
   { (* Atom [0 < x + u] *)
     rewrite Z.eqb_eq in *. subst c. rewrite Z.mul_1_l in *.
-    exists (add (neg u) (TConstant 1)). (* b = -u+1 *)
+    exists (add (neg u) (TConstant (CGround 1))). (* b = -u+1 *)
     rewrite <-Z.le_ngt in *.
     erewrite extend_insensitive with (n1:=x-D) (n2:=x) in *; eauto.
     erewrite extend_insensitive with (n2:=x); eauto using wf_add, wf_neg.
     rewrite interpret_add, interpret_neg. simpl.
-    set (u' := interpret_term (extend env x) u) in *.
+    set (u' := interpret_term cenv (extend env x) u) in *.
     assert (-u' + 1 <= x <= -u' + D) by lia.
     exists (x + u' - 1). (* j *) eauto with zarith. }
   { (* Atom [0 < - x + u] *)
@@ -2187,13 +2262,13 @@ Proof.
 Qed.
 
 Lemma bset_correct_divlcm:
-  forall env f x u,
+  forall cenv env f x u,
   all normal f ->
   nnf f ->
-  interpret_formula (extend env x) f ->
-  ~ interpret_formula (extend env (x - divlcm f)) f ->
+  interpret_formula cenv (extend env x) f ->
+  ~ interpret_formula cenv (extend env (x - divlcm f)) f ->
   exists b j,
-    x = interpret_term (extend env u) b + j /\
+    x = interpret_term cenv (extend env u) b + j /\
     In b (bset f) /\
     0 <= j < divlcm f.
 Proof.
@@ -2207,31 +2282,31 @@ Qed.
 
 (* Quantifier elimination for formulas, in the "least element" case. *)
 
-Notation least_element_interpret env f :=
-  (least_element (fun x => interpret_formula (extend env x) f)).
+Notation least_element_interpret cenv env f :=
+  (least_element (fun x => interpret_formula cenv (extend env x) f)).
 
-Notation least_element_interpret_qe env f := (
-  interpret_formula env (
+Notation least_element_interpret_qe cenv env f := (
+  interpret_formula cenv env (
     big_disjunction (fun i =>
       big_disjunction (fun b =>
-        subst (add b (TConstant i)) f
+        subst (add b (TConstant (CGround i))) f
       ) (bset f)
     ) (interval (divlcm f))
   )
 ).
 
 Lemma least_element_qe_impl:
-  forall env f u,
+  forall cenv env f u,
   all normal f ->
   nnf f ->
-  least_element_interpret env f ->
-  least_element_interpret_qe (extend env u) f.
+  least_element_interpret cenv env f ->
+  least_element_interpret_qe cenv (extend env u) f.
 Proof.
-  intros ? ? ? ? ?.
+  intros ? ? ? ? ? ?.
   { intros [x [Hf Hnf]]. pose (D := divlcm f). forwards~: divlcm_nonneg f.
     specializes Hnf (x - D) __. subst D; lia.
     rewrite interpret_big_disjunction2.
-    forwards~ [b [j (Hx&?&?)]]: bset_correct_divlcm env f x.
+    forwards~ [b [j (Hx&?&?)]]: bset_correct_divlcm cenv env f x.
     apply big_or_prove with j; auto. rewrite~ In_interval.
     apply big_or_prove with b; auto.
     rewrite~ interpret_subst. rewrite interpret_add. simpl.
@@ -2242,13 +2317,13 @@ Qed.
    hold. For the reverse direction, we only need to prove this: *)
 
 Lemma least_element_qe_rev:
-  forall env f u,
+  forall cenv env f u,
   all normal f ->
   nnf f ->
-  least_element_interpret_qe (extend env u) f ->
-  exists x, interpret_formula (extend env x) f.
+  least_element_interpret_qe cenv (extend env u) f ->
+  exists x, interpret_formula cenv (extend env x) f.
 Proof.
-  intros ? ? ? ? ? Hqe.
+  intros ? ? ? ? ? ? Hqe.
   rewrite interpret_big_disjunction in Hqe.
   apply big_or_inv in Hqe. destruct Hqe as [j [? Hqe]].
   rewrite interpret_big_disjunction in Hqe.
@@ -2266,9 +2341,9 @@ Definition cooper (f : formula) : formula :=
   let f_inf := minusinf f in
   let bs := bset f in
   let js := interval (divlcm f) in
-  let f_element := (fun j b => subst (add b (TConstant j)) f) in
+  let f_element := (fun j b => subst (add b (TConstant (CGround j))) f) in
   let stage := (fun j =>
-    disjunction (subst (TConstant j) f_inf)
+    disjunction (subst (TConstant (CGround j)) f_inf)
                 (big_disjunction (f_element j) bs)
   ) in
   shift (big_disjunction stage js).
@@ -2276,11 +2351,11 @@ Definition cooper (f : formula) : formula :=
 (* [cooper f] is equivalent to [FExists f], and is quantifier-free. *)
 
 Lemma interpret_cooper:
-  forall env f,
+  forall cenv env f,
   wff f ->
   nnf f ->
-  interpret_formula env (cooper f) <->
-  interpret_formula env (FExists f).
+  interpret_formula cenv env (cooper f) <->
+  interpret_formula cenv env (FExists f).
 Proof.
   intros.
   rewrite~ interpret_unity. simpl.
@@ -2455,9 +2530,9 @@ Qed.
 (* [qe f] is equivalent to [f]. *)
 
 Lemma interpret_qe:
-  forall f env,
+  forall cenv f env,
   wff_ue f ->
-  interpret_formula env (qe f) <-> interpret_formula env f.
+  interpret_formula cenv env (qe f) <-> interpret_formula cenv env f.
 Proof.
   induction f; intros; wff_ue; simpl in * |-; try tauto;
   [ repeat match goal with
@@ -2472,7 +2547,7 @@ Proof.
   cbn [qe].
   assert (wff (posnnf (qe f))). now apply wf_posnnf, wf_qe.
   assert (nnf (posnnf (qe f))). now apply nnf_posnnf, qf_wff, wf_qe.
-  transitivity (interpret_formula env (cooper (posnnf (qe f)))); cycle 1.
+  transitivity (interpret_formula cenv env (cooper (posnnf (qe f)))); cycle 1.
   { rewrite~ interpret_cooper. simpl. apply exists_equivalence.
     intro. rewrite~ interpret_posnnf. }
 
