@@ -21,7 +21,8 @@ Require Import MiniCooper.LinSimpl.
 Inductive raw_term :=
 | RAdd : raw_term -> raw_term -> raw_term
 | RSub : raw_term -> raw_term -> raw_term
-| RMul : num -> var -> raw_term
+| RMul1 : num -> raw_term -> raw_term
+| RMul2 : raw_term -> num -> raw_term
 | ROpp : raw_term -> raw_term
 | RVar : var -> raw_term
 | RConstant : constant -> raw_term.
@@ -63,8 +64,10 @@ Fixpoint interpret_raw_term (cenv env : environment) (t : raw_term) : num :=
     (interpret_raw_term cenv env t1) + (interpret_raw_term cenv env t2)
   | RSub t1 t2 =>
     (interpret_raw_term cenv env t1) - (interpret_raw_term cenv env t2)
-  | RMul k v =>
-    k * (env v)
+  | RMul1 k t =>
+    k * (interpret_raw_term cenv env t)
+  | RMul2 t k =>
+    (interpret_raw_term cenv env t) * k
   | ROpp t =>
     - (interpret_raw_term cenv env t)
   | RVar v =>
@@ -146,14 +149,19 @@ Definition neg_lin '((m, c) : linearized) :=
 Definition sub_lin (l1 l2 : linearized) :=
   add_lin l1 (neg_lin l2).
 
+Definition mul_lin (k : Z) '((m, c) : linearized) :=
+  (Monoms.mul k m, cmul k c).
+
 Fixpoint linearize_raw_term (t : raw_term) : linearized :=
   match t with
   | RAdd t1 t2 =>
     add_lin (linearize_raw_term t1) (linearize_raw_term t2)
   | RSub t1 t2 =>
     sub_lin (linearize_raw_term t1) (linearize_raw_term t2)
-  | RMul k v =>
-    ([(v, k)], CGround 0)
+  | RMul1 k t =>
+    mul_lin k (linearize_raw_term t)
+  | RMul2 t k =>
+    mul_lin k (linearize_raw_term t)
   | ROpp t =>
     neg_lin (linearize_raw_term t)
   | RVar v =>
@@ -239,36 +247,34 @@ Hint Rewrite
 Ltac interp :=
   simpl; autorewrite with interp in *.
 
+Local Arguments Z.mul : simpl nomatch.
+
 Lemma interpret_add_lin:
   forall cenv env l1 l2,
   interpret_linearized cenv env (add_lin l1 l2) =
   interpret_linearized cenv env l1 + interpret_linearized cenv env l2.
-Proof.
-  destruct l1 as [m1 c1]. destruct l2 as [m2 c2].
-  induction m1 as [| [? ?]]; intros; simpl in *; interp; eauto.
-Qed.
-
-Local Arguments Z.mul : simpl nomatch.
+Proof. intros; destruct l1, l2; interp; lia. Qed.
 
 Lemma interpret_neg_lin:
   forall cenv env l,
-  interpret_linearized cenv env (neg_lin l) =
-  - interpret_linearized cenv env l.
-Proof.
-  destruct l as [m c].
-  induction m as [| [? ?]]; intros; simpl in *; interp; eauto. nia.
-Qed.
+  interpret_linearized cenv env (neg_lin l) = - interpret_linearized cenv env l.
+Proof. intros; destruct l; interp; lia. Qed.
 
 Lemma interpret_sub_lin:
   forall cenv env l1 l2,
   interpret_linearized cenv env (sub_lin l1 l2) =
   interpret_linearized cenv env l1 - interpret_linearized cenv env l2.
-Proof.
-  intros; unfold sub_lin; interp. rewrite interpret_add_lin, interpret_neg_lin.
-  omega.
-Qed.
+Proof. intros; destruct l1, l2; interp; lia. Qed.
 
-Hint Rewrite interpret_add_lin interpret_neg_lin interpret_sub_lin : interp.
+Lemma interpret_mul_lin:
+  forall cenv env k l,
+  interpret_linearized cenv env (mul_lin k l) =
+  k * interpret_linearized cenv env l.
+Proof. intros; destruct l; interp; lia. Qed.
+
+Hint Rewrite
+  interpret_add_lin interpret_neg_lin interpret_sub_lin interpret_mul_lin
+: interp.
 
 Lemma interpret_linearize_raw_term:
   forall cenv env t,
@@ -484,15 +490,15 @@ Ltac reflect_term term csts cid cont :=
     reflect_term x csts cid ltac:(fun t1 csts cid =>
     reflect_term y csts cid ltac:(fun t2 csts cid =>
     cont (RSub t1 t2) csts cid))
-  | tApp (tConst "Coq.ZArith.BinIntDef.Z.mul" []) [?x; tRel ?v] =>
+  | tApp (tConst "Coq.ZArith.BinIntDef.Z.mul" []) [?x; ?y] =>
     tryif is_ground_Z x then (
       denote_term x ltac:(fun k =>
-      cont (RMul k v) csts cid)
-    ) else fail 100 "Multiplicative constants must be concrete terms"
-  | tApp (tConst "Coq.ZArith.BinIntDef.Z.mul" []) [tRel ?v; ?x] =>
-    tryif is_ground_Z x then (
-      denote_term x ltac:(fun k =>
-      cont (RMul k v) csts cid)
+      reflect_term y csts cid ltac:(fun t csts cid =>
+      cont (RMul1 k t) csts cid))
+    ) else tryif is_ground_Z y then (
+      denote_term y ltac:(fun k =>
+      reflect_term x csts cid ltac:(fun t csts cid =>
+      cont (RMul2 k t) csts cid))
     ) else fail 100 "Multiplicative constants must be concrete terms"
   | tApp (tConst "Coq.ZArith.BinIntDef.Z.opp" []) [?x] =>
     reflect_term x csts cid ltac:(fun t csts cid =>
@@ -613,11 +619,11 @@ Goal exists x, 0 <= 2 * x + 5 \/ x > 3.
 Qed.
 
 Goal forall a, exists x, a <= x /\ x < a + 1.
-  intro. qe. auto.
+  intros. qe. auto.
 Qed.
 
 Goal ~ (exists x y, 2 * x + 1 = 2 * y).
-  intros. qe. auto.
+  qe. auto.
 Qed.
 
 Goal exists x y, 4 * x - 6 * y = 1.
@@ -628,5 +634,6 @@ Goal forall a b, ~ (exists x, ~(~ (b < x) \/ a <= x)).
   intros. qe.
 Abort.
 
-(* Goal ~ (exists x, ~ (exists y, 2 * y <= x /\ x < 2 * (y + 1))). *)
-(*   qe. *)
+Goal ~ (exists x, ~ (exists y, 2 * y <= x /\ x < 2 * (y + 1))).
+  qe. auto.
+Qed.

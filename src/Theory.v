@@ -2402,7 +2402,7 @@ Fixpoint simpl_formula (f : formula) : formula :=
   | FOr f1 f2 =>
     disjunction (simpl_formula f1) (simpl_formula f2)
   | FNot f =>
-    FNot (simpl_formula f)
+    negation (simpl_formula f)
   | FExists f =>
     FExists (simpl_formula f)
   end.
@@ -2453,7 +2453,7 @@ Proof.
   - now rewrite interpret_simpl_atom; simpl; rewrite interpret_simpl_term.
   - rewrite interpret_conjunction, IHf1, IHf2. tauto.
   - rewrite interpret_disjunction, IHf1, IHf2. tauto.
-  - rewrite IHf. tauto.
+  - rewrite interpret_negation, IHf. tauto.
   - apply exists_equivalence. eauto.
 Qed.
 
@@ -2463,7 +2463,8 @@ Lemma wf_simpl_formula:
   wff (simpl_formula f).
 Proof.
   induction f; intros; simpl in *; wff; unpack;
-    eauto using wft_simpl_term, wf_simpl_atom, wf_conjunction, wf_disjunction.
+    eauto using wft_simpl_term, wf_simpl_atom,
+    wf_conjunction, wf_disjunction, wf_negation.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
