@@ -14,8 +14,8 @@ Require Import MiniCooper.LinSimpl.
 (* ------------------------------------------------------------------------- *)
 (* The surface syntax that the tactic recognizes.
 
-   The goal is to the least amount of work possible in Ltac, so the syntax is
-   directly reified to the surface syntax defined here, and
+   The goal is to the least amount of work possible in Ltac, so the goal is
+   directly reified into the surface syntax defined here, and
    preprocessing/normalization is written as Coq functions. *)
 
 Inductive raw_term :=
