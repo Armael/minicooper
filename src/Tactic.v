@@ -25,7 +25,8 @@ Inductive raw_term :=
 | RMul2 : raw_term -> num -> raw_term
 | ROpp : raw_term -> raw_term
 | RVar : var -> raw_term
-| RConstant : constant -> raw_term.
+| RAbstract : var -> raw_term
+| RGround : num -> raw_term.
 
 Inductive raw_predicate_1 :=
 | RDv : num -> raw_predicate_1.
@@ -72,8 +73,10 @@ Fixpoint interpret_raw_term (cenv env : environment) (t : raw_term) : num :=
     - (interpret_raw_term cenv env t)
   | RVar v =>
     env v
-  | RConstant c =>
-    interpret_constant cenv c
+  | RAbstract v =>
+    cenv v
+  | RGround z =>
+    z
   end.
 
 Fixpoint interpret_raw_predicate_1 (p : raw_predicate_1) (t : num) : Prop :=
@@ -166,8 +169,10 @@ Fixpoint linearize_raw_term (t : raw_term) : linearized :=
     neg_lin (linearize_raw_term t)
   | RVar v =>
     ([(v, 1)], CGround 0)
-  | RConstant x =>
-    ([], x)
+  | RAbstract v =>
+    ([], CAbstract v)
+  | RGround z =>
+    ([], CGround z)
   end.
 
 Definition normalize_linearized '((l, c) : linearized) : linearized :=
@@ -187,7 +192,7 @@ Definition to_term (t : raw_term) : term :=
   linearized_to_term t.
 
 Definition plus1 (t : raw_term) : raw_term :=
-  RAdd t (RConstant (CGround 1)).
+  RAdd t (RGround 1).
 
 Definition raw_predicate_to_atom (p : raw_predicate) : predicate * term :=
   match p with
@@ -508,14 +513,14 @@ Ltac reflect_term term csts cid cont :=
   | ?x =>
     tryif is_ground_Z x then
       denote_term x ltac:(fun k =>
-      cont (RConstant (CGround k)) csts cid)
+      cont (RGround k) csts cid)
     else
       try_lookup_constant x csts O
         ltac:(fun idx =>
           let cidx := eval cbv in (cid - idx - 1)%nat in
-          cont (RConstant (CAbstract cidx)) csts cid)
+          cont (RAbstract cidx) csts cid)
         ltac:(fun tt =>
-          cont (RConstant (CAbstract cid)) (x::csts) (S cid))
+          cont (RAbstract cid) (x::csts) (S cid))
   end.
 
 Ltac reflect_predicate term csts cid cont :=
