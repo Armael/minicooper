@@ -3,6 +3,7 @@ Require Import ZArith Psatz.
 Open Scope Z_scope.
 Require Import Znumtheory.
 Require Import List Sorting Permutation.
+Require Import FunInd.
 Import ListNotations.
 Open Scope list_scope.
 
@@ -250,7 +251,7 @@ Hint Rewrite
 : interp.
 
 Ltac interp :=
-  simpl; autorewrite with interp in *.
+  simpl in *; autorewrite with interp in *; simpl in *.
 
 Local Arguments Z.mul : simpl nomatch.
 
@@ -339,7 +340,7 @@ Proof.
   intros cenv env p. destruct p as [p1|p2].
   { destruct p1. simpl. case_if; interp; subst; try reflexivity.
     split; [ intros <- | intros ]. reflexivity. forwards*: Z.divide_0_l. }
-  { destruct p2; interp; simpl; lia. }
+  { destruct p2; interp; lia. }
 Qed.
 
 Lemma interpret_raw_formula_to_formula:
@@ -423,21 +424,182 @@ Proof.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
+(* Conversion from the internal syntax to the surface syntax, as a
+   post-processing phase. *)
+
+Function add_monom_rmul (k : num) (t : raw_term) :=
+  match t with
+  | RGround k' =>
+    RGround (k * k')
+  | _ =>
+    if Z.eqb k 1 then
+      t
+    else
+      RMul1 k t
+  end.
+
+Function add_monom (t : raw_term) (k : num) (t' : raw_term) :=
+  match t with
+  | RGround 0 =>
+    if Z.ltb k 0 then
+      ROpp (add_monom_rmul (- k) t')
+    else
+      add_monom_rmul k t'
+  | _ =>
+    if Z.ltb k 0 then
+      RSub t (add_monom_rmul (- k) t')
+    else
+      RAdd t (add_monom_rmul k t')
+  end.
+
+Lemma interpret_add_monom:
+  forall cenv env t k v,
+  interpret_raw_term cenv env (add_monom t k v) =
+  interpret_raw_term cenv env t + k * interpret_raw_term cenv env v.
+Proof.
+  intros.
+  functional induction (add_monom t k v); simpl;
+  match goal with |- context [add_monom_rmul ?k ?t] =>
+    functional induction (add_monom_rmul k t)
+  end;
+  simpl; try nia; interp; nia.
+Qed.
+
+Hint Rewrite interpret_add_monom : interp.
+
+Definition postprocess_constant (acc : raw_term) (l : LinCst.lin) : raw_term :=
+  fold_right (fun '(v, k) acc =>
+    match v with
+    | O => add_monom acc k (RGround 1)
+    | S n => add_monom acc k (RAbstract n)
+    end
+  ) acc l.
+
+Lemma interpret_postprocess_constant:
+  forall cenv env acc l,
+  interpret_raw_term cenv env (postprocess_constant acc l) =
+  interpret_raw_term cenv env acc + LinCst.interpret_lin (interp_var cenv) l.
+Proof.
+  induction l as [|[? ?]]; simpl in *; eauto.
+  destruct t; interp; rewrite IHl; nia.
+Qed.
+
+Hint Rewrite interpret_postprocess_constant : interp.
+
+Fixpoint postprocess_term' (acc : raw_term) (t : term) : raw_term :=
+  match t with
+  | TSummand k y u =>
+    postprocess_term' (add_monom acc k (RVar y)) u
+  | TConstant c =>
+    let lin := LinCst.simpl (linearize_constant c) in
+    postprocess_constant acc lin
+  end.
+
+Definition postprocess_term t :=
+  postprocess_term' (RGround 0) t.
+
+Lemma interpret_postprocess_term':
+  forall cenv env t acc,
+  interpret_raw_term cenv env (postprocess_term' acc t) =
+  interpret_raw_term cenv env acc + interpret_term cenv env t.
+Proof.
+  induction t; intros; interp.
+  - rewrite IHt. interp. nia.
+  - rewrite LinCst.interpret_simpl, interpret_linearize_constant. lia.
+Qed.
+
+Lemma interpret_postprocess_term:
+  forall cenv env t,
+  interpret_raw_term cenv env (postprocess_term t) =
+  interpret_term cenv env t.
+Proof.
+  intros; unfold postprocess_term; rewrite interpret_postprocess_term'; eauto.
+Qed.
+
+Hint Rewrite interpret_postprocess_term : interp.
+
+Definition postprocess_atom (p : predicate) (t : term) : raw_formula :=
+  match p with
+  | Eq => (* (0 = t) *)
+    RAtom (RPred2 REq (postprocess_term t) (RGround 0))
+  | Lt => (* (0 < t) *)
+    RAtom (RPred2 RLt (RGround 0) (postprocess_term t))
+  | Dv z => (* (z | t) *)
+    RAtom (RPred1 (RDv z) (postprocess_term t))
+  end.
+
+Lemma interpret_postprocess_atom:
+  forall cenv env p t,
+  interpret_raw_formula cenv env (postprocess_atom p t) <->
+  interpret_formula cenv env (FAtom p t).
+Proof. destruct p; intros; interp; try lia; tauto. Qed.
+
+Definition postprocess_neg_atom (p : predicate) (t : term) : raw_formula :=
+  match p with
+  | Lt => (* ~ (0 < t) <=> t <= 0 *)
+    RAtom (RPred2 RLe (postprocess_term t) (RGround 0))
+  | _ =>
+    RNot (postprocess_atom p t)
+  end.
+
+Lemma interpret_postprocess_neg_atom:
+  forall cenv env p t,
+  interpret_raw_formula cenv env (postprocess_neg_atom p t) <->
+  ~ interpret_formula cenv env (FAtom p t).
+Proof. destruct p; intros; interp; try lia; tauto. Qed.
+
+Hint Rewrite interpret_postprocess_atom interpret_postprocess_neg_atom : interp.
+
+Function postprocess_formula (f : formula) : raw_formula :=
+  match f with
+  | FNot (FAtom p t) =>
+    postprocess_neg_atom p t
+  | FAtom p t =>
+    postprocess_atom p t
+  | FFalse =>
+    RFalse
+  | FTrue =>
+    RTrue
+  | FAnd f1 f2 =>
+    RAnd (postprocess_formula f1) (postprocess_formula f2)
+  | FOr f1 f2 =>
+    ROr (postprocess_formula f1) (postprocess_formula f2)
+  | FNot f =>
+    RNot (postprocess_formula f)
+  | FExists f =>
+    RExists (postprocess_formula f)
+  end.
+
+Lemma interpret_postprocess_formula:
+  forall cenv f env,
+  interpret_raw_formula cenv env (postprocess_formula f) <->
+  interpret_formula cenv env f.
+Proof.
+  intros cenv f.
+  functional induction (postprocess_formula f); intros; interp;
+    rewrite ?IHr0, ?IHr; try tauto.
+  apply exists_equivalence. eauto.
+Qed.
+
+Hint Rewrite interpret_postprocess_formula : interp.
+
+(* ------------------------------------------------------------------------- *)
 
 (* The main theorem used by the tactic *)
 
 Definition empty_env : environment := (fun (n:nat) => 0).
 
+Hint Rewrite interpret_qe : interp.
+
 Lemma cooper_qe_theorem (cenv : environment) (f : raw_formula) :
   let f' := raw_formula_to_formula f in
   check_wff f' = true ->
   forall qef',
-  qe f' = qef' ->
-  interpret_formula cenv empty_env qef' ->
+  postprocess_formula (qe f') = qef' ->
+  interpret_raw_formula cenv empty_env qef' ->
   interpret_raw_formula cenv empty_env f.
 Proof.
-  simpl; intros. subst qef'. rewrite interpret_qe in *; interp; auto.
-  apply~ check_wff_correct.
+  simpl; intros. subst; interp; auto. apply~ check_wff_correct.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
@@ -611,9 +773,10 @@ Ltac qe :=
       mkcenv csts ltac:(fun cenv =>
         eapply (@cooper_qe_theorem cenv f); [
           cbv; reflexivity
-        | cbv; reflexivity
-        | cbv [interpret_formula interpret_predicate
-               interpret_term interpret_constant nthZ]
+        | vm_compute; reflexivity
+        | cbv [interpret_raw_formula interpret_raw_predicate
+               interpret_raw_predicate_1 interpret_raw_predicate_2
+               interpret_raw_term interpret_constant nthZ]
         ]
       )
     )
@@ -635,7 +798,7 @@ Goal exists x y, 4 * x - 6 * y = 1.
   qe.
 Abort.
 
-Goal forall a b, ~ (exists x, ~(~ (b < x) \/ a <= x)).
+Goal forall a b, ~ (exists x, (b < x) /\ ~ a <= x).
   intros. qe.
 Abort.
 
