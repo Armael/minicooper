@@ -50,7 +50,10 @@ Inductive raw_formula :=
 | RAnd : raw_formula -> raw_formula -> raw_formula
 | ROr : raw_formula -> raw_formula -> raw_formula
 | RNot : raw_formula -> raw_formula
-| RExists : raw_formula -> raw_formula.
+| RArrow : raw_formula -> raw_formula -> raw_formula
+| RIff : raw_formula -> raw_formula -> raw_formula
+| RExists : raw_formula -> raw_formula
+| RForall : raw_formula -> raw_formula.
 
 Hint Constructors
      raw_term
@@ -125,8 +128,14 @@ Fixpoint interpret_raw_formula (cenv env : environment) (f : raw_formula)
     (interpret_raw_formula cenv env f1) \/ (interpret_raw_formula cenv env f2)
   | RNot f' =>
     ~ (interpret_raw_formula cenv env f')
+  | RArrow f1 f2 =>
+    (interpret_raw_formula cenv env f1) -> (interpret_raw_formula cenv env f2)
+  | RIff f1 f2 =>
+    (interpret_raw_formula cenv env f1) <-> (interpret_raw_formula cenv env f2)
   | RExists f' =>
     exists z, interpret_raw_formula cenv (extend env z) f'
+  | RForall f' =>
+    forall z, interpret_raw_formula cenv (extend env z) f'
   end.
 
 (* ------------------------------------------------------------------------- *)
@@ -232,8 +241,15 @@ Fixpoint raw_formula_to_formula (f : raw_formula) : formula :=
     FOr (raw_formula_to_formula f1) (raw_formula_to_formula f2)
   | RNot f =>
     FNot (raw_formula_to_formula f)
+  | RArrow f1 f2 =>
+    FOr (FNot (raw_formula_to_formula f1)) (raw_formula_to_formula f2)
+  | RIff f1 f2 =>
+    FOr (FAnd (raw_formula_to_formula f1) (raw_formula_to_formula f2))
+        (FAnd (FNot (raw_formula_to_formula f1)) (FNot (raw_formula_to_formula f2)))
   | RExists f =>
     FExists (raw_formula_to_formula f)
+  | RForall f =>
+    FNot (FExists (FNot (raw_formula_to_formula f)))
   end.
 
 (* ------------------------------------------------------------------------- *)
@@ -348,15 +364,17 @@ Lemma interpret_raw_formula_to_formula:
   interpret_formula cenv env (raw_formula_to_formula f) <->
   interpret_raw_formula cenv env f.
 Proof.
-  induction f; intros; interp; [
-    repeat match goal with h: forall _:environment, _ |- _ =>
-      specialize (h env) end
-  .. |];
-  try tauto.
+  induction f; intros; interp;
+  try (rewrite ?IHf, ?IHf1, ?IHf2; tauto).
   - match goal with r:raw_predicate |- _ =>
       forwards: interpret_raw_predicate_to_atom cenv env r end.
     destruct (raw_predicate_to_atom r). eauto.
   - apply exists_equivalence. eauto.
+  - split.
+    + intros HH ?. eapply Classical_Pred_Type.not_ex_not_all in HH.
+      rewrite <-IHf. eauto.
+    + intros HH. apply Classical_Pred_Type.all_not_not_ex.
+      intros n. specializes HH n. rewrite IHf. tauto.
 Qed.
 
 Hint Rewrite interpret_raw_formula_to_formula : interp.
@@ -647,103 +665,117 @@ Ltac try_lookup_constant c csts idx cont_found cont_fail :=
     try_lookup_constant c csts' (S idx) cont_found cont_fail
   end.
 
-Ltac reflect_term term csts cid cont :=
+Ltac reflect_term term unshift csts cid cont :=
   lazymatch term with
   | tApp (tConst "Coq.ZArith.BinIntDef.Z.add" []) [?x; ?y] =>
-    reflect_term x csts cid ltac:(fun t1 csts cid =>
-    reflect_term y csts cid ltac:(fun t2 csts cid =>
-    cont (RAdd t1 t2) csts cid))
+    reflect_term x unshift csts cid ltac:(fun t1 unshift csts cid =>
+    reflect_term y unshift csts cid ltac:(fun t2 unshift csts cid =>
+    cont (RAdd t1 t2) unshift csts cid))
   | tApp (tConst "Coq.ZArith.BinIntDef.Z.sub" []) [?x; ?y] =>
-    reflect_term x csts cid ltac:(fun t1 csts cid =>
-    reflect_term y csts cid ltac:(fun t2 csts cid =>
-    cont (RSub t1 t2) csts cid))
+    reflect_term x unshift csts cid ltac:(fun t1 unshift csts cid =>
+    reflect_term y unshift csts cid ltac:(fun t2 unshift csts cid =>
+    cont (RSub t1 t2) unshift csts cid))
   | tApp (tConst "Coq.ZArith.BinIntDef.Z.mul" []) [?x; ?y] =>
     tryif is_ground_Z x then (
       denote_term x ltac:(fun k =>
-      reflect_term y csts cid ltac:(fun t csts cid =>
-      cont (RMul1 k t) csts cid))
+      reflect_term y unshift csts cid ltac:(fun t unshift csts cid =>
+      cont (RMul1 k t) unshift csts cid))
     ) else tryif is_ground_Z y then (
       denote_term y ltac:(fun k =>
-      reflect_term x csts cid ltac:(fun t csts cid =>
-      cont (RMul2 k t) csts cid))
+      reflect_term x unshift csts cid ltac:(fun t unshift csts cid =>
+      cont (RMul2 k t) unshift csts cid))
     ) else fail 100 "Multiplicative constants must be concrete terms"
   | tApp (tConst "Coq.ZArith.BinIntDef.Z.opp" []) [?x] =>
-    reflect_term x csts cid ltac:(fun t csts cid =>
-    cont (ROpp t) csts cid)
+    reflect_term x unshift csts cid ltac:(fun t unshift csts cid =>
+    cont (ROpp t) unshift csts cid)
   | tRel ?n =>
-    cont (RVar n) csts cid
+    let n := eval cbv in (n - unshift)%nat in
+    cont (RVar n) unshift csts cid
   | ?x =>
     tryif is_ground_Z x then
       denote_term x ltac:(fun k =>
-      cont (RGround k) csts cid)
+      cont (RGround k) unshift csts cid)
     else
       try_lookup_constant x csts O
         ltac:(fun idx =>
           let cidx := eval cbv in (cid - idx - 1)%nat in
-          cont (RAbstract cidx) csts cid)
+          cont (RAbstract cidx) unshift csts cid)
         ltac:(fun tt =>
-          cont (RAbstract cid) (x::csts) (S cid))
+          cont (RAbstract cid) unshift (x::csts) (S cid))
   end.
 
-Ltac reflect_predicate term csts cid cont :=
+Ltac reflect_predicate term unshift csts cid cont :=
   lazymatch term with
   | tApp (tInd {| inductive_mind := "Coq.Init.Logic.eq"; inductive_ind := 0 |} [])
       [tInd {| inductive_mind := "Coq.Numbers.BinNums.Z"; inductive_ind := 0 |} [];
        ?x; ?y] =>
-    reflect_term x csts cid ltac:(fun t1 csts cid =>
-    reflect_term y csts cid ltac:(fun t2 csts cid =>
-    cont (RPred2 REq t1 t2) csts cid))
+    reflect_term x unshift csts cid ltac:(fun t1 unshift csts cid =>
+    reflect_term y unshift csts cid ltac:(fun t2 unshift csts cid =>
+    cont (RPred2 REq t1 t2) unshift csts cid))
   | tApp (tConst "Coq.ZArith.BinInt.Z.lt" []) [?x; ?y] =>
-    reflect_term x csts cid ltac:(fun t1 csts cid =>
-    reflect_term y csts cid ltac:(fun t2 csts cid =>
-    cont (RPred2 RLt t1 t2) csts cid))
+    reflect_term x unshift csts cid ltac:(fun t1 unshift csts cid =>
+    reflect_term y unshift csts cid ltac:(fun t2 unshift csts cid =>
+    cont (RPred2 RLt t1 t2) unshift csts cid))
   | tApp (tConst "Coq.ZArith.BinInt.Z.le" []) [?x; ?y] =>
-    reflect_term x csts cid ltac:(fun t1 csts cid =>
-    reflect_term y csts cid ltac:(fun t2 csts cid =>
-    cont (RPred2 RLe t1 t2) csts cid))
+    reflect_term x unshift csts cid ltac:(fun t1 unshift csts cid =>
+    reflect_term y unshift csts cid ltac:(fun t2 unshift csts cid =>
+    cont (RPred2 RLe t1 t2) unshift csts cid))
   | tApp (tConst "Coq.ZArith.BinInt.Z.gt" []) [?x; ?y] =>
-    reflect_term x csts cid ltac:(fun t1 csts cid =>
-    reflect_term y csts cid ltac:(fun t2 csts cid =>
-    cont (RPred2 RGt t1 t2) csts cid))
+    reflect_term x unshift csts cid ltac:(fun t1 unshift csts cid =>
+    reflect_term y unshift csts cid ltac:(fun t2 unshift csts cid =>
+    cont (RPred2 RGt t1 t2) unshift csts cid))
   | tApp (tConst "Coq.ZArith.BinInt.Z.ge" []) [?x; ?y] =>
-    reflect_term x csts cid ltac:(fun t1 csts cid =>
-    reflect_term y csts cid ltac:(fun t2 csts cid =>
-    cont (RPred2 RGe t1 t2) csts cid))
+    reflect_term x unshift csts cid ltac:(fun t1 unshift csts cid =>
+    reflect_term y unshift csts cid ltac:(fun t2 unshift csts cid =>
+    cont (RPred2 RGe t1 t2) unshift csts cid))
   | tApp (tConst "Coq.ZArith.BinInt.Z.divide" []) [?x; ?y] =>
     tryif is_ground_Z x then (
       denote_term x ltac:(fun c =>
-      reflect_term y csts cid ltac:(fun t csts cid =>
-      cont (RPred1 (RDv c) t) csts cid))
+      reflect_term y unshift csts cid ltac:(fun t unshift csts cid =>
+      cont (RPred1 (RDv c) t) unshift csts cid))
     ) else fail 100 "Divisibility can only be by concrete constants"
   end.
 
-Ltac reflect_formula term csts cid cont :=
+Ltac reflect_formula term unshift csts cid cont :=
   lazymatch term with
   | tInd {| inductive_mind := "Coq.Init.Logic.False"; inductive_ind := 0 |} [] =>
-    cont RFalse csts cid
+    cont RFalse unshift csts cid
   | tInd {| inductive_mind := "Coq.Init.Logic.True"; inductive_ind := 0 |} [] =>
-    cont RTrue csts cid
+    cont RTrue unshift csts cid
   | tApp (tInd {| inductive_mind := "Coq.Init.Logic.and"; inductive_ind := 0 |} [])
          [?P; ?Q] =>
-    reflect_formula P csts cid ltac:(fun f1 csts cid =>
-    reflect_formula Q csts cid ltac:(fun f2 csts cid =>
-    cont (RAnd f1 f2) csts cid))
+    reflect_formula P unshift csts cid ltac:(fun f1 unshift csts cid =>
+    reflect_formula Q unshift csts cid ltac:(fun f2 unshift csts cid =>
+    cont (RAnd f1 f2) unshift csts cid))
   | tApp (tInd {| inductive_mind := "Coq.Init.Logic.or"; inductive_ind := 0 |} [])
          [?P; ?Q] =>
-    reflect_formula P csts cid ltac:(fun f1 csts cid =>
-    reflect_formula Q csts cid ltac:(fun f2 csts cid =>
-    cont (ROr f1 f2) csts cid))
+    reflect_formula P unshift csts cid ltac:(fun f1 unshift csts cid =>
+    reflect_formula Q unshift csts cid ltac:(fun f2 unshift csts cid =>
+    cont (ROr f1 f2) unshift csts cid))
   | tApp (tConst "Coq.Init.Logic.not" []) [?P] =>
-    reflect_formula P csts cid ltac:(fun f csts cid =>
-    cont (RNot f) csts cid)
+    reflect_formula P unshift csts cid ltac:(fun f unshift csts cid =>
+    cont (RNot f) unshift csts cid)
+  | tApp (tConst "Coq.Init.Logic.iff" []) [?P; ?Q] =>
+    reflect_formula P unshift csts cid ltac:(fun f1 unshift csts cid =>
+    reflect_formula Q unshift csts cid ltac:(fun f2 unshift csts cid =>
+    cont (RIff f1 f2) unshift csts cid))
   | tApp (tInd {| inductive_mind := "Coq.Init.Logic.ex"; inductive_ind := 0 |} [])
          [tInd {| inductive_mind := "Coq.Numbers.BinNums.Z"; inductive_ind := 0 |} [];
           tLambda _ _ ?body] =>
-    reflect_formula body csts cid ltac:(fun f csts cid =>
-    cont (RExists f) csts cid)
+    reflect_formula body unshift csts cid ltac:(fun f unshift csts cid =>
+    cont (RExists f) unshift csts cid)
+  | tProd _
+      (tInd {| inductive_mind := "Coq.Numbers.BinNums.Z"; inductive_ind := 0 |} [])
+      ?body =>
+    reflect_formula body unshift csts cid ltac:(fun f unshift csts cid =>
+    cont (RForall f) unshift csts cid)
+  | tProd nAnon ?P ?Q =>
+    reflect_formula P unshift csts cid ltac:(fun f1 unshift csts cid =>
+    reflect_formula Q (S unshift) csts cid ltac:(fun f2 unshift csts cid =>
+    cont (RArrow f1 f2) unshift csts cid))
   | ?f =>
-    reflect_predicate f csts cid ltac:(fun p csts cid =>
-    cont (RAtom p) csts cid)
+    reflect_predicate f unshift csts cid ltac:(fun p unshift csts cid =>
+    cont (RAtom p) unshift csts cid)
   end.
 
 Ltac denote_csts csts cont :=
@@ -769,7 +801,7 @@ Ltac mkcenv csts cont :=
 
 Ltac qe :=
   match goal with |- ?X => quote_term X ltac:(fun tm =>
-    reflect_formula tm ([]:list term) 0%nat ltac:(fun f csts _ =>
+    reflect_formula tm 0%nat ([]:list term) 0%nat ltac:(fun f _ csts _ =>
       mkcenv csts ltac:(fun cenv =>
         eapply (@cooper_qe_theorem cenv f); [
           cbv; reflexivity
@@ -790,7 +822,11 @@ Goal forall a, exists x, a <= x /\ x < a + 1.
   intros. qe. auto.
 Qed.
 
-Goal ~ (exists x y, 2 * x + 1 = 2 * y).
+Goal forall x y, ~ (2 * x + 1 = 2 * y).
+  qe. auto.
+Qed.
+
+Goal forall x, exists y, 2 * y <= x /\ x < 2 * (y + 1).
   qe. auto.
 Qed.
 
@@ -798,10 +834,10 @@ Goal exists x y, 4 * x - 6 * y = 1.
   qe.
 Abort.
 
-Goal forall a b, ~ (exists x, (b < x) /\ ~ a <= x).
-  intros. qe.
-Abort.
-
-Goal ~ (exists x, ~ (exists y, 2 * y <= x /\ x < 2 * (y + 1))).
+Goal forall x, ~ (2 | x) /\ (3 | x-1) <-> (12 | x-1) \/ (12 | x-7).
   qe. auto.
 Qed.
+
+Goal forall a b, forall x, b < x -> a <= x.
+  intros a b. qe.
+Abort.
