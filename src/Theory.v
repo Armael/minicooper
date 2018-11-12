@@ -13,8 +13,6 @@ Open Scope Z_scope.
 
 (* ------------------------------------------------------------------------- *)
 
-Section S.
-
 (* Arithmetic lemmas. *)
 
 Ltac Zabs_either :=
@@ -2601,5 +2599,3 @@ Proof.
   { intros HH. destruct HH as [[x ?]|[x ?]]; exists x; tauto. }
   { intros HH. destruct HH as [x [?|?]]; [left|right]; exists x; tauto. }
 Qed.
-
-End S.
