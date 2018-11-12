@@ -142,7 +142,7 @@ Fixpoint interpret_raw_formula (cenv env : environment) (f : raw_formula)
 (* Intermediate representation for terms as a linear combination. *)
 
 Module Monoms := LinSimpl (NatVar).
-Notation linearized := (Monoms.lin * constant)%type.
+Local Notation linearized := (Monoms.lin * constant)%type.
 
 Definition interpret_linearized (cenv env : environment) '((l, c) : linearized)
 : num :=
@@ -845,3 +845,14 @@ Abort.
 Goal forall a b, exists x, 2 * a - 3 * b + 1 <= x /\ (x < a + b \/ x < 2 * a).
   intros a b. qe.
 Abort.
+
+(*
+Goal forall a b c,
+  exists x y z,
+  0 <= x /\ 0 <= y /\ 0 <= z /\
+  a <= x /\ b <= y /\ c <= z.
+Proof.
+  intros *. qe.
+  Time lia. (* 6s *)
+Qed.
+*)
