@@ -666,7 +666,7 @@ Ltac try_lookup_constant c csts idx cont_found cont_fail :=
   end.
 
 Ltac reflect_term term unshift csts cid cont :=
-  lazymatch term with
+  match term with
   | tApp (tConst "Coq.ZArith.BinIntDef.Z.add" []) [?x; ?y] =>
     reflect_term x unshift csts cid ltac:(fun t1 unshift csts cid =>
     reflect_term y unshift csts cid ltac:(fun t2 unshift csts cid =>
@@ -684,7 +684,7 @@ Ltac reflect_term term unshift csts cid cont :=
       denote_term y ltac:(fun k =>
       reflect_term x unshift csts cid ltac:(fun t unshift csts cid =>
       cont (RMul2 k t) unshift csts cid))
-    ) else fail 100 "Multiplicative constants must be concrete terms"
+    ) else fail
   | tApp (tConst "Coq.ZArith.BinIntDef.Z.opp" []) [?x] =>
     reflect_term x unshift csts cid ltac:(fun t unshift csts cid =>
     cont (ROpp t) unshift csts cid)
@@ -838,7 +838,7 @@ Goal forall x, ~ (2 | x) /\ (3 | x-1) <-> (12 | x-1) \/ (12 | x-7).
   qe. auto.
 Qed.
 
-Goal forall a b, forall x, b < x -> a <= x.
+Goal forall a b, forall x, b < x -> a <= x + (a+1)*b.
   intros a b. qe.
 Abort.
 
