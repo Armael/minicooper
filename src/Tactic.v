@@ -607,15 +607,26 @@ Hint Rewrite interpret_postprocess_formula : interp.
 
 Definition empty_env : environment := (fun (n:nat) => 0).
 
-Hint Rewrite interpret_qe : interp.
+Hint Rewrite interpret_qe interpret_posnnf : interp.
 
 Lemma cooper_qe_theorem (cenv : environment) (f : raw_formula) :
   let f' := raw_formula_to_formula f in
   check_wff f' = true ->
   forall qef',
-  postprocess_formula (qe f') = qef' ->
+  postprocess_formula (posnnf (qe f')) = qef' ->
   interpret_raw_formula cenv empty_env qef' ->
   interpret_raw_formula cenv empty_env f.
+Proof.
+  simpl; intros. subst; interp; auto. now apply check_wff_correct.
+Qed.
+
+Lemma cooper_qe_theorem_in (cenv : environment) (f : raw_formula) :
+  let f' := raw_formula_to_formula f in
+  check_wff f' = true ->
+  forall qef',
+  postprocess_formula (posnnf (qe f')) = qef' ->
+  interpret_raw_formula cenv empty_env f ->
+  interpret_raw_formula cenv empty_env qef'.
 Proof.
   simpl; intros. subst; interp; auto. now apply check_wff_correct.
 Qed.
@@ -799,6 +810,17 @@ Ltac mkcenv csts cont :=
     cont constr:(fun n => nthZ n csts)
   ).
 
+Ltac cbv_interp :=
+  cbv [interpret_raw_formula interpret_raw_predicate
+       interpret_raw_predicate_1 interpret_raw_predicate_2
+       interpret_raw_term interpret_constant nthZ].
+
+Ltac cbv_interp_in H :=
+  cbv [interpret_raw_formula interpret_raw_predicate
+       interpret_raw_predicate_1 interpret_raw_predicate_2
+       interpret_raw_term interpret_constant nthZ]
+  in H.
+
 Ltac qe :=
   match goal with |- ?X => quote_term X ltac:(fun tm =>
     reflect_formula tm 0%nat ([]:list term) 0%nat ltac:(fun f _ csts _ =>
@@ -806,41 +828,84 @@ Ltac qe :=
         eapply (@cooper_qe_theorem cenv f); [
           cbv; reflexivity
         | vm_compute; reflexivity
-        | cbv [interpret_raw_formula interpret_raw_predicate
-               interpret_raw_predicate_1 interpret_raw_predicate_2
-               interpret_raw_term interpret_constant nthZ]
+        | cbv_interp
         ]
       )
     )
   ) end.
 
+Ltac qe_in H :=
+  match type of H with ?X => quote_term X ltac:(fun tm =>
+    reflect_formula tm 0%nat ([]:list term) 0%nat ltac:(fun f _ csts _ =>
+      mkcenv csts ltac:(fun cenv =>
+        eapply (@cooper_qe_theorem_in cenv f) in H; [
+          (* The goal *)
+        | cbv; reflexivity
+        | vm_compute; reflexivity
+      ]; cbv_interp_in H
+      )
+    )
+  ) end.
+
+Tactic Notation "qe" "in" ident(H) :=
+  qe_in H.
+
 Goal exists x, 0 <= 2 * x + 5 \/ x > 3.
   qe. auto.
+Qed.
+
+Goal (exists x, 0 <= 2 * x + 5 \/ x > 3) -> True.
+  intro H. qe in H. auto.
 Qed.
 
 Goal forall a, exists x, a <= x /\ x < a + 1.
   intros. qe. auto.
 Qed.
 
+Goal forall a, (exists x, a <= x /\ x < a + 1) -> True.
+  intros. qe in H. auto.
+Qed.
+
 Goal forall x y, ~ (2 * x + 1 = 2 * y).
   qe. auto.
+Qed.
+
+Goal (forall x y, ~ (2 * x + 1 = 2 * y)) -> True.
+  intros. qe in H. auto.
 Qed.
 
 Goal forall x, exists y, 2 * y <= x /\ x < 2 * (y + 1).
   qe. auto.
 Qed.
 
+Goal (forall x, exists y, 2 * y <= x /\ x < 2 * (y + 1)) -> True.
+  intros. qe in H. auto.
+Qed.
+
 Goal exists x y, 4 * x - 6 * y = 1.
   qe.
 Abort.
+
+Goal (exists x y, 4 * x - 6 * y = 1) -> False.
+  intros. qe in H. auto.
+Qed.
 
 Goal forall x, ~ (2 | x) /\ (3 | x-1) <-> (12 | x-1) \/ (12 | x-7).
   qe. auto.
 Qed.
 
+Goal (forall x, ~ (2 | x) /\ (3 | x-1) <-> (12 | x-1) \/ (12 | x-7)) -> True.
+  intros. qe in H. auto.
+Qed.
+
 Goal forall a b, forall x, b < x -> a <= x + (a+1)*b.
   intros a b. qe.
 Abort.
+
+Goal forall a b, (forall x, b < x -> a <= x + (a+1)*b) ->
+                 0 < (a + 1) * b - a + b + 2.
+  intros a b H. qe in H. auto.
+Qed.
 
 Goal forall a b, exists x, 2 * a - 3 * b + 1 <= x /\ (x < a + b \/ x < 2 * a).
   intros a b. qe.
@@ -852,7 +917,22 @@ Goal forall a b c,
   0 <= x /\ 0 <= y /\ 0 <= z /\
   a <= x /\ b <= y /\ c <= z.
 Proof.
-  intros *. qe.
-  Time lia. (* 6s *)
+  intros *. qe. Time lia. (* 6s *)
+Qed.
+*)
+
+(*
+Goal forall a b c,
+  exists x y z,
+  0 <= x /\ 0 <= y /\ 0 <= z /\
+  a <= x /\ b <= y /\ c <= z.
+Proof.
+  intros *. apply Classical_Prop.NNPP.
+  intro H. qe in H.
+  Time Fail Fail lia. (* 6, still slow *)
+
+  (* trivially split the assumption on /\ *)
+  unpack.
+  Time lia. (* fast! what is happening? *)
 Qed.
 *)
