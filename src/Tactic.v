@@ -355,7 +355,7 @@ Lemma interpret_raw_predicate_to_atom:
 Proof.
   intros cenv env p. destruct p as [p1|p2].
   { destruct p1. simpl. case_if; interp; subst; try reflexivity.
-    split; [ intros <- | intros ]. reflexivity. forwards*: Z.divide_0_l. }
+    split; [ intros <- | intros ]. reflexivity. symmetry. now apply Z.divide_0_l. }
   { destruct p2; interp; lia. }
 Qed.
 
@@ -367,14 +367,14 @@ Proof.
   induction f; intros; interp;
   try (rewrite ?IHf, ?IHf1, ?IHf2; tauto).
   - match goal with r:raw_predicate |- _ =>
-      forwards: interpret_raw_predicate_to_atom cenv env r end.
+      pose proof (interpret_raw_predicate_to_atom cenv env r) end.
     destruct (raw_predicate_to_atom r). eauto.
   - apply exists_equivalence. eauto.
   - split.
     + intros HH ?. eapply Classical_Pred_Type.not_ex_not_all in HH.
       rewrite <-IHf. eauto.
     + intros HH. apply Classical_Pred_Type.all_not_not_ex.
-      intros n. specializes HH n. rewrite IHf. tauto.
+      intros n. specialize (HH n). rewrite IHf. tauto.
 Qed.
 
 Hint Rewrite interpret_raw_formula_to_formula : interp.
@@ -617,7 +617,7 @@ Lemma cooper_qe_theorem (cenv : environment) (f : raw_formula) :
   interpret_raw_formula cenv empty_env qef' ->
   interpret_raw_formula cenv empty_env f.
 Proof.
-  simpl; intros. subst; interp; auto. apply~ check_wff_correct.
+  simpl; intros. subst; interp; auto. now apply check_wff_correct.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
@@ -839,5 +839,9 @@ Goal forall x, ~ (2 | x) /\ (3 | x-1) <-> (12 | x-1) \/ (12 | x-7).
 Qed.
 
 Goal forall a b, forall x, b < x -> a <= x.
+  intros a b. qe.
+Abort.
+
+Goal forall a b, exists x, 2 * a - 3 * b + 1 <= x /\ (x < a + b \/ x < 2 * a).
   intros a b. qe.
 Abort.

@@ -159,7 +159,7 @@ Lemma interpret_lin_permutation:
   Permutation l1 l2 ->
   interpret_lin var l1 = interpret_lin var l2.
 Proof.
-  introv HP. induction HP;
+  intros * HP. induction HP;
   repeat match goal with x: (_ * _)%type |- _ => destruct x end;
   simpl; auto.
 Qed.

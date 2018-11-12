@@ -1,5 +1,4 @@
 Require Export Coq.Program.Equality.
-Require Export TLC.LibTactics.
 Require Export Omega.
 
 (* Hints for invoking omega on arithmetic subgoals. *)
@@ -13,30 +12,35 @@ Hint Extern 1 (_ > _) => omega.
 Hint Extern 1 (_ <= _) => omega.
 Hint Extern 1 (_ >= _) => omega.
 
-(* Dealing with integer comparisons. *)
+(* Dealing with if *)
 
-Ltac inspect_cases :=
+Ltac case_if :=
+  let H := fresh in
   match goal with
-  | |- context [le_gt_dec ?n ?n'] =>
-      case (le_gt_dec n n')
-  | h: context [le_gt_dec ?n ?n'] |- _ =>
-      generalize h; clear h; case (le_gt_dec n n'); intro h
-  | |- context [eq_nat_dec ?n ?n'] =>
-      case (eq_nat_dec n n')
-  | h: context [eq_nat_dec ?n ?n'] |- _ =>
-      generalize h; clear h; case (eq_nat_dec n n'); intro h
-  | |- context [(lt_eq_lt_dec ?n ?n')] =>
-       let s := fresh in
-       case (lt_eq_lt_dec n n'); [ intro s; case s; clear s | idtac ]
+  | |- context [if ?b then _ else _] =>
+    destruct b eqn:H
+  | h: context [if ?b then _ else _] |- _ =>
+    destruct b eqn:H
   end.
 
-Ltac by_cases :=
-  repeat inspect_cases; try solve [ intros; false; omega ]; intros.
+(* Hypothesis handling *)
 
-Ltac easy :=
-  try omega;
-  try ( f_equal; omega );
-  try solve [ auto ].
+Ltac applyin H :=
+  match goal with h: _ |- _ => apply H in h end.
+
+Ltac spec1 H :=
+  lazymatch type of H with
+  | ?A -> ?B =>
+    let a := fresh in
+    assert (a : A); [ eauto | specialize (H a); clear a ]
+  | forall x : ?A, _ =>
+    let a := fresh in
+    evar (a : A);
+    specialize (H a); subst a
+  end.
+
+Ltac spec H :=
+  repeat (spec1 H; []).
 
 (* This tactic unpacks all existentially quantified hypotheses and splits all
    conjunctive hypotheses. *)
@@ -97,51 +101,8 @@ Proof.
   intros ? ? ? z h. unpack (h z). unpack h. eauto.
 Qed.
 
-(* Destructuring triples of propositions. *)
-
-Set Implicit Arguments.
-
-Lemma pi1:
-  forall A B C, A /\ B /\ C -> A.
-Proof.
-  intuition.
-Qed.
-
-Lemma pi2:
-  forall A B C, A /\ B /\ C -> B.
-Proof.
-  intuition.
-Qed.
-
-Lemma pi3:
-  forall A B C, A /\ B /\ C -> C.
-Proof.
-  intuition.
-Qed.
-
-(* A convenient function. *)
-
-Definition transpose A B (f : A -> A -> B) x y := f y x.
-
 (* Turn some tactics into hints. *)
 
 Hint Extern 1 => f_equal : f_equal.
 
 Hint Extern 1 => congruence : congruence.
-
-(* Support for marking the induction hypothesis. The mark [mark_ih] must be
-   used in the statement, after the hypothesis that serves for the induction.
-   The tactic [intros_ih] introduces the hypotheses, while unfolding the mark
-   in the goal, so it does not block the hypotheses that follow it. The tactic
-   [use_ih] applies and clears a hypothesis that bears the mark. *)
-
-Definition mark_ih (P : Prop) := P.
-
-Ltac intros_ih :=
-  intros; unfold mark_ih; intros.
-
-Ltac use_ih :=
-  match goal with ih: mark_ih _ |- _ => unfold mark_ih in ih; eapply ih; clear ih end.
-
-Ltac clear_ih :=
-  repeat match goal with ih: mark_ih _ |- _ => clear ih end.

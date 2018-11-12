@@ -262,13 +262,16 @@ Proof.
   (* Case TSummand/TSummand. *)
   case_eq (Nat.compare x1 x2); intro.
     (* Sub-case x1 = x2. *)
-    forwards: nat_compare_eq. eassumption.
+    applyin nat_compare_eq.
+    (* forwards: nat_compare_eq.  eassumption.*)
     destruct (Z.eq_dec (k1 + k2) 0); eauto using wft_monotone.
     (* Sub-case x1 < x2. *)
-    forwards: nat_compare_Lt_lt. eassumption.
+    applyin nat_compare_Lt_lt.
+    (* forwards: nat_compare_Lt_lt. eassumption. *)
     eauto using wft_monotone.
     (* Sub-case x1 > x2. *)
-    forwards: nat_compare_Gt_gt. eassumption.
+    applyin nat_compare_Gt_gt.
+    (* forwards: nat_compare_Gt_gt. eassumption. *)
     eauto using wft_monotone.
   (* Case TSummand/TConstant. *)
   eauto.
@@ -289,7 +292,8 @@ Proof.
   (* Case TSummand/TSummand. *)
   case_eq (Nat.compare x1 x2); intro.
     (* Sub-case x1 = x2. *)
-    forwards: nat_compare_eq. eassumption. subst x1.
+    applyin nat_compare_eq.
+    (* forwards: nat_compare_eq. eassumption.  *)subst x1.
     destruct (Z.eq_dec (k1 + k2) 0) as [ k1k2 | ].
       (* Sub-sub-case k1 + k2 = 0. *)
       match goal with |- ?lhs = _ =>
@@ -360,7 +364,7 @@ Lemma extend_env_other:
   (y > 0)%nat ->
   extend env n1 y = extend env n2 y.
 Proof.
-  intros. destruct y. false; omega. auto.
+  intros. destruct y. exfalso; omega. auto.
 Qed.
 
 (* If the variable 0 does not occur in the term [t], then the interpretation of
@@ -396,7 +400,7 @@ Lemma adjust_env_other:
   (y > 0)%nat ->
   adjust_env l env y = env y.
 Proof.
-  intros. destruct y. false; omega. auto.
+  intros. destruct y. exfalso; omega. auto.
 Qed.
 
 (* If the variable 0 does not occur in the term [t], then the interpretation of
@@ -576,17 +580,16 @@ Proof.
   (* Case: [FAtom]. *)
   erewrite interpret_term_extensional; [ idtac | eauto ]. tauto.
   (* Case: [FAnd]. *)
-  specializes IHf1 env1 env2.
-  specializes IHf2 env1 env2.
+  specialize (IHf1 env1 env2).
+  specialize (IHf2 env1 env2). tauto.
   (* Case: [FOr]. *)
-  specializes IHf1 env1 env2.
-  specializes IHf2 env1 env2.
+  specialize (IHf1 env1 env2).
+  specialize (IHf2 env1 env2). tauto.
   (* Case: [FNot]. *)
-  specializes IHf env1 env2.
+  specialize (IHf env1 env2). tauto.
   (* Case: [FExists]. *)
-  split; intros [ z ? ]; exists z.
-  forwards: IHf. eapply extend_extensional. eassumption. intuition eauto.
-  forwards: IHf. eapply extend_extensional. eassumption. intuition eauto.
+  split; intros [ z ? ]; exists z; [ rewrite <-IHf | rewrite IHf ];
+  eauto using extend_extensional.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
@@ -794,7 +797,7 @@ Lemma all_big_disjunction:
    all P (F x)) ->
   all P (big_disjunction F l).
 Proof.
-  introv HH.
+  intros * HH.
   induction l; simpl in *; eauto.
   apply all_disjunction; eauto.
 Qed.
@@ -815,7 +818,7 @@ Lemma big_or_prove : forall A (P : A -> Prop) l x,
   P x ->
   big_or P l.
 Proof.
-  induction l; introv HIn; inversion HIn.
+  induction l; intros * HIn; inversion HIn.
   - subst. cbn. tauto.
   - intros. simpl. eauto.
 Qed.
@@ -824,7 +827,7 @@ Lemma big_or_inv : forall A (P : A -> Prop) l,
   big_or P l ->
   exists x, In x l /\ P x.
 Proof.
-  induction l; introv H; simpl in H; try tauto.
+  induction l; intros * H; simpl in H; try tauto.
   firstorder.
 Qed.
 
@@ -832,7 +835,7 @@ Lemma big_or_extens : forall A (P1 P2 : A -> Prop) l,
   (forall x, P1 x <-> P2 x) ->
   big_or P1 l <-> big_or P2 l.
 Proof.
-  introv E. induction l; intros; simpl in *; try tauto.
+  intros * E. induction l; intros; simpl in *; try tauto.
   rewrite IHl, E; tauto.
 Qed.
 
@@ -875,8 +878,7 @@ Proof.
   - simpl. lia.
   - cbn [interval' In]. destruct (Z.eq_dec x (Z.of_nat n)); [ lia |].
     split; intro.
-    + enough (0 <= x < Z.of_nat n) by lia. rewrite <-IHn.
-      now branches; [ false | auto ].
+    + intuition lia.
     + rewrite IHn. lia.
 Qed.
 
@@ -949,7 +951,7 @@ Proof.
     omega. (* cool *)
     (* Case: [FNot]. Again, classical reasoning is required. *)
     split.
-    specializes interpret_posnnf cenv env f.
+    specialize (interpret_posnnf cenv env f). tauto.
     intro. apply <- interpret_posnnf. tauto.
 Qed.
 
@@ -1080,7 +1082,7 @@ Lemma formula_lcm_nonzero:
   wff f ->
   formula_lcm f <> 0.
 Proof.
-  intros. forwards~: formula_lcm_nonneg f.
+  intros. applyin formula_lcm_nonneg. lia.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
@@ -1167,7 +1169,7 @@ Lemma scale_Dv_atom:
   t1 = k * t2 ->
   ( (d1 | t1) <-> (d2 | t2) ).
 Proof.
-  intros. split; introv h; subst.
+  intros. split; intros * h; subst.
   (* Left to right. *)
   destruct h as [ q h ]. exists q.
   assert (i: t2 * k = (q * d2) * k).
@@ -1314,7 +1316,7 @@ Proof.
     rewrite Z_div_same_full; eauto using nonzero_quotient.
     right.
     rewrite Z_div_same_full; eauto using nonzero_quotient. }
-  { apply~ Z.mul_pos_pos. apply Z.abs_pos. apply~ nonzero_quotient. }
+  { apply Z.mul_pos_pos; [|lia]. apply Z.abs_pos. apply nonzero_quotient; auto. }
 Qed.
 
 Lemma normal_adjust_formula_lcm:
@@ -1419,7 +1421,7 @@ Proof.
   eauto using normal_adjust_formula_lcm.
   econstructor.
     eauto using normal_adjust_formula_lcm.
-    econstructor. splits~. apply~ formula_lcm_nonneg.
+    econstructor. split; eauto using formula_lcm_nonneg.
 Qed.
 
 Lemma wf_unity:
@@ -1459,7 +1461,7 @@ Proof.
   generalize (not_all_ex_not _ _ h); clear h; intros [ x h ].
   exists x; intros.
   generalize (not_ex_all_not _ _ h); clear h; intro h.
-  specializes h y.
+  specialize (h y).
   tauto.
 Qed.
 
@@ -1486,14 +1488,14 @@ Proof.
      arbitrarily far towards the right, so that the condition ``if there is an
      element of [P] below [y]'' in the limit becomes equivalent to ``if there
      is an element of [P]''. *)
-  introv hfloor.
+  intros * hfloor.
   (* We prove this by well-founded induction, bounded below by [floor]. *)
   eapply (@Zlt_lower_bound_ind (fun y =>
     (exists x, P x /\ x < y) -> (exists x, P x /\ forall y, y < x -> ~ P y)
   )).
   intros y ih ? [ x [ ? ? ]].
   (* [x] satisfies [P], so it cannot be below [floor]. *)
-  assert (~ x < floor). specializes hfloor x. tauto.
+  assert (~ x < floor). specialize (hfloor x). tauto.
   (* Either [x] is the least element of [P], or there is another solution of [P]
      between [floor] and [x]. Let us refer to it as [sx], for ``a smaller [x]''.
   *)
@@ -1518,10 +1520,10 @@ Lemma lower_bound_least_element:
   (* Then P admits a least element. *)
   (exists x, P x /\ forall y, y < x -> ~ P y).
 Proof.
-  introv hfloor [ x ? ].
+  intros * hfloor [ x ? ].
   eapply lower_bound_least_element_preliminary with (y := x + 1).
   eassumption.
-  assert (~ x < floor). specializes hfloor x. tauto. omega.
+  assert (~ x < floor). specialize (hfloor x). tauto. omega.
   exists x. split. assumption. omega.
 Qed.
 
@@ -1546,8 +1548,8 @@ Lemma sink_or_least_element_reciprocal:
   sink P \/ least_element P ->
   exists x, P x.
 Proof.
-  introv [ h | [ x [ ? ? ]]].
-  specializes h 0. unpack. eauto.
+  intros * [ h | [ x [ ? ? ]]].
+  specialize (h 0). unpack. eauto.
   eauto.
 Qed.
 
@@ -1695,13 +1697,13 @@ Lemma sink_minusinf_equiv:
   sink (fun x => interpret_formula cenv (extend env x) f) <->
   sink (fun x => interpret_formula cenv (extend env x) (minusinf f)).
 Proof.
-  introv Hn.
-  forwards [y0 Hy0]: interpret_minusinf cenv env Hn.
+  intros * Hn.
+  pose proof (interpret_minusinf cenv env Hn) as [y0 Hy0].
   split.
-  { intros H x. forwards H': H (Z.min x y0). destruct H' as [y' [? ?]].
-    exists y'. rewrite <-Hy0 by lia. split~. lia. }
-  { intros H x. forwards H': H (Z.min x y0). destruct H' as [y' [? ?]].
-    exists  y'. rewrite Hy0 by lia. split~. lia. }
+  { intros H x. destruct (H (Z.min x y0)) as [y' [? ?]].
+    exists y'. rewrite <-Hy0 by lia. split; auto. lia. }
+  { intros H x. destruct (H (Z.min x y0)) as [y' [? ?]].
+    exists  y'. rewrite Hy0 by lia. split; auto. lia. }
 Qed.
 
 (* ------------------------------------------------------------------------- *)
@@ -1824,8 +1826,7 @@ Lemma interpret_minusinf_modulo_divlcm:
   interpret_formula cenv (extend env x) (minusinf f) <->
   interpret_formula cenv (extend env (x + k * (divlcm f))) (minusinf f).
 Proof.
-  intros. apply~ interpret_minusinf_modulo_dvdvx.
-  apply~ all_dvdvx_divlcm.
+  intros. eauto using interpret_minusinf_modulo_dvdvx, all_dvdvx_divlcm.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
@@ -1840,13 +1841,13 @@ Lemma sink_invariant_modulo_equiv_exists:
   (forall x k, P x <-> P (x + k * D)) ->
   sink P <-> (exists y, P y).
 Proof.
-  introv HD HPinv.
+  intros * HD HPinv.
   split.
   { (* the trivial case *)
-    intros H. specializes H 0. destruct H as [y [? ?]]. exists~ y. }
+    intros H. destruct (H 0) as [y [? ?]]. eauto. }
   { intros [y Hy] x. destruct (Z_lt_le_dec y x). now eauto.
     exists (y + ((x - y) / D - 1) * D); split; cycle 1.
-    now rewrite <-HPinv. forwards: Z.mul_div_le (x - y) D; lia. }
+    now rewrite <-HPinv. pose proof (Z.mul_div_le (x - y) D); lia. }
 Qed.
 
 Lemma invariant_modulo_exists_equiv_big_or:
@@ -1856,13 +1857,13 @@ Lemma invariant_modulo_exists_equiv_big_or:
   (forall x k, P x <-> P (x + k * D)) ->
   (exists y, P y) <-> big_or P (interval D).
 Proof.
-  introv HD HPinv.
+  intros * HD HPinv.
   split.
   { intros [y Hy]. apply big_or_prove with (y mod D).
-    - forwards~: Z.mod_pos_bound y D. rewrite In_interval. lia.
+    - pose proof (Z.mod_pos_bound y D). rewrite In_interval. lia.
     - rewrite HPinv with (k := y / D).
       rewrite Z.add_comm, Z.mul_comm, <-Z.div_mod; auto. }
-  { intro H. forwards [i [H1 H2]]: big_or_inv H. firstorder. }
+  { intro H. destruct (big_or_inv _ _ H) as [i [H1 H2]]. eauto. }
 Qed.
 
 Lemma sink_equiv_big_or:
@@ -1919,7 +1920,7 @@ Lemma wf_subst:
 Proof.
   induction f; intros; simpl in *; wff; eauto.
   wff. destruct t; [destruct n|]; wft; eauto .
-  constructor. split~. apply wf_add. apply~ wf_mul.
+  constructor. split; auto. apply wf_add. apply wf_mul; auto.
   eapply wft_monotone. eauto. omega.
 Qed.
 
@@ -2001,7 +2002,7 @@ Lemma interpret_shift:
   interpret_formula cenv (extend env x) f.
 Proof.
   induction 1; simpl in *; try tauto.
-  wff. rewrite~ interpret_shift_term. tauto.
+  wff. rewrite interpret_shift_term; tauto.
 Qed.
 
 Lemma wf_shift:
@@ -2017,7 +2018,7 @@ Lemma nnf_shift:
   nnf f ->
   nnf (shift f).
 Proof.
-  induction f; intros; simpl in *; nnf; eauto. constructor~.
+  induction f; intros; simpl in *; nnf; eauto. constructor. auto.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
@@ -2039,13 +2040,13 @@ Lemma sink_qe:
   all normal f ->
   sink_interpret cenv env f <-> sink_interpret_qe cenv (extend env u) f.
 Proof.
-  intros. rewrite~ sink_minusinf_equiv.
+  intros. rewrite sink_minusinf_equiv by auto.
   rewrite sink_equiv_big_or with (D := divlcm f); cycle 1.
-  now apply~ divlcm_nonneg.
+  now apply divlcm_nonneg; auto.
   now eauto using interpret_minusinf_modulo_divlcm.
   rewrite interpret_big_disjunction. apply big_or_extens.
   intro. rewrite interpret_subst. reflexivity.
-  now apply~ wf_minusinf.
+  now apply wf_minusinf; auto.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
@@ -2114,7 +2115,7 @@ Lemma wf1_In_bset:
   In t (bset f) ->
   wft 1 t.
 Proof.
-  intros. forwards~ HH: wf1_bset f. rewrite~ Forall_forall in HH.
+  intros. applyin wf1_bset. rewrite Forall_forall in *. eauto.
 Qed.
 
 Lemma bset_correct:
@@ -2158,10 +2159,10 @@ Proof.
     assert (-u' + 1 <= x <= -u' + D) by lia.
     exists (x + u' - 1). (* j *) eauto with zarith. }
   { (* Atom [0 < - x + u] *)
-    rewrite Z.eqb_neq in *. false.
+    rewrite Z.eqb_neq in *. exfalso.
     erewrite extend_insensitive with (n1:=x-D) (n2:=x) in *; eauto.
     nia. }
-  { false. predicate; term; nnf; simpl in *; eauto; classical.
+  { exfalso. predicate; term; nnf; simpl in *; eauto; classical.
     - wft. erewrite extend_insensitive with (n1:=x-D) in *; eauto.
     - unpack. subst. rewrite Z.mul_1_l in *.
       erewrite extend_insensitive with (n1:=x-D) (n2:=x) in *; eauto.
@@ -2170,14 +2171,14 @@ Proof.
       auto with zarith.
       rewrite Z.add_assoc, Z.add_opp_l. auto.
     - wft. erewrite extend_insensitive with (n1:=x-D) (n2:=x) in *; eauto. }
-  { nnf. false. predicate; term; eauto. }
+  { nnf. exfalso. predicate; term; eauto. }
   { nnf. classical.
-    branches; [ forwards*: IHl | forwards*: IHl0 ]; unpack;
-    do 2 eexists; repeat split; eauto using in_or_app. }
-  { nnf. classical.
-    branches; [ forwards*: IHl | forwards*: IHl0 ]; unpack;
-    do 2 eexists; repeat split; eauto using in_or_app. }
-  { false.
+    match goal with h: _ \/ _ |- _ => destruct h end; [ spec IHl | spec IHl0 ];
+      unpack; do 2 eexists; repeat split; eauto using in_or_app. }
+  { nnf. classical. unpack.
+    match goal with h: _ \/ _ |- _ => destruct h end; [ spec IHl | spec IHl0 ];
+      unpack; do 2 eexists; repeat split; eauto using in_or_app. }
+  { exfalso.
     destruct f; simpl in *; eauto; repeat all.
     - predicate; term; eauto; unfold normal in *; unpack; simpl in *.
       + wft. erewrite extend_insensitive with (n1:=x-D) (n2:=x) in *; eauto.
@@ -2202,9 +2203,9 @@ Lemma bset_correct_divlcm:
     0 <= j < divlcm f.
 Proof.
   intros.
-  apply~ bset_correct.
-  now apply~ divlcm_nonneg.
-  now apply~ all_dvdvx_divlcm.
+  apply bset_correct; auto.
+  now apply divlcm_nonneg; auto.
+  now apply all_dvdvx_divlcm; auto.
 Qed.
 
 (* ------------------------------------------------------------------------- *)
@@ -2231,15 +2232,15 @@ Lemma least_element_qe_impl:
   least_element_interpret cenv env f ->
   least_element_interpret_qe cenv (extend env u) f.
 Proof.
-  intros ? ? ? ? ? ?.
-  { intros [x [Hf Hnf]]. pose (D := divlcm f). forwards~: divlcm_nonneg f.
-    specializes Hnf (x - D) __. subst D; lia.
-    rewrite interpret_big_disjunction2.
-    forwards~ [b [j (Hx&?&?)]]: bset_correct_divlcm cenv env f x.
-    apply big_or_prove with j; auto. rewrite~ In_interval.
-    apply big_or_prove with b; auto.
-    rewrite~ interpret_subst. rewrite interpret_add. simpl.
-    rewrite Hx in Hf. apply Hf. }
+  intros * ? ? [x [Hf Hnf]]. pose (D := divlcm f).
+  specialize (Hnf (x - D)). spec1 Hnf.
+  { enough (0 < D) by lia. eauto using divlcm_nonneg. }
+  rewrite interpret_big_disjunction2.
+  destruct (@bset_correct_divlcm cenv env f x u) as [b [j (Hx&?&?)]]; auto.
+  apply big_or_prove with j; auto. rewrite In_interval; auto.
+  apply big_or_prove with b; auto.
+  rewrite interpret_subst by auto. rewrite interpret_add. simpl.
+  rewrite Hx in Hf. apply Hf.
 Qed.
 
 (* We do not actually need to prove the equivalence for the final theorem to
@@ -2287,7 +2288,7 @@ Lemma interpret_cooper:
   interpret_formula cenv env (FExists f).
 Proof.
   intros.
-  rewrite~ interpret_unity. simpl.
+  rewrite interpret_unity by auto. simpl.
   unfold cooper.
   (* 0 is a dummy value, associated in the environment to variable [x],
      which does not happen in the term. *)
@@ -2295,7 +2296,7 @@ Proof.
   { apply all_big_disjunction. intros. apply all_disjunction.
     - now apply wf1_subst, wf_minusinf, wf_unity.
     - apply all_big_disjunction. intros. apply wf1_subst.
-      + apply~ wf_add. eapply wf1_In_bset;[|eassumption]. now apply wf_unity.
+      + apply wf_add; auto. eapply wf1_In_bset;[|eassumption]. now apply wf_unity.
       + now apply wf_unity. }
 
   rewrite interpret_big_disjunction.
@@ -2315,7 +2316,7 @@ Proof.
 
   { (* QE for the "sink" case. *)
     rewrite sink_qe. rewrite interpret_big_disjunction. reflexivity.
-    apply~ normal_unity. }
+    apply normal_unity; auto. }
 
   { (* QE for the "least element" case (-> direction). *)
     rewrite <-interpret_big_disjunction.
@@ -2342,7 +2343,7 @@ Proof.
   apply all_disjunction. now eauto using wf1_subst, wf_minusinf, wf_unity.
   apply all_big_disjunction. intros.
   apply wf1_subst. now eauto using wf1_subst, wf_unity, wf_add, wf1_In_bset.
-  apply~ wf_unity.
+  now apply wf_unity.
 Qed.
 
 Lemma nnf_cooper:
@@ -2430,7 +2431,7 @@ Proof.
   functional induction (simpl_atom p t); unfold boolf, Zdivideb in *;
     repeat case_if; simpl;
     rewrite ?Z.eqb_eq, ?Z.eqb_neq, ?Z.ltb_lt, ?Z.ltb_ge in *;
-    try lia; tauto.
+    try lia; try tauto; discriminate.
 Qed.
 
 Lemma wf_simpl_atom:
@@ -2552,7 +2553,7 @@ Lemma all_map_disjuncts:
   all P (map_disjuncts transform f).
 Proof.
   intros. destruct f; simpl; eauto.
-  all. apply~ all_disjunction.
+  all. apply all_disjunction; eauto.
 Qed.
 
 (* This entails that [qe f] is quantifier-free. *)
@@ -2575,7 +2576,7 @@ Lemma interpret_qe:
 Proof.
   induction f; intros; wff_ue; simpl in * |-; try tauto;
   [ repeat match goal with
-      h: forall e:environment, _ |- _ => specializes h env
+      h: forall e:environment, _ |- _ => specialize (h env)
     end; simpl
   .. | ].
   rewrite interpret_conjunction; tauto.
@@ -2587,8 +2588,8 @@ Proof.
   assert (wff (posnnf (qe f))). now apply wf_posnnf, wf_qe.
   assert (nnf (posnnf (qe f))). now apply nnf_posnnf, qf_wff, wf_qe.
   transitivity (interpret_formula cenv env (cooper (posnnf (qe f)))); cycle 1.
-  { rewrite~ interpret_cooper. simpl. apply exists_equivalence.
-    intro. rewrite~ interpret_posnnf. }
+  { rewrite interpret_cooper by auto. simpl. apply exists_equivalence.
+    intro. rewrite interpret_posnnf. auto. }
 
   rewrite interpret_simpl_formula.
   functional induction (map_disjuncts cooper (posnnf (qe f))); try tauto;[].
