@@ -821,6 +821,11 @@ Ltac cbv_interp_in H :=
        interpret_raw_term interpret_constant nthZ]
   in H.
 
+Strategy expand
+  [interpret_raw_formula interpret_raw_predicate
+   interpret_raw_predicate_1 interpret_raw_predicate_2
+   interpret_raw_term interpret_constant nthZ].
+
 Ltac qe :=
   match goal with |- ?X => quote_term X ltac:(fun tm =>
     reflect_formula tm 0%nat ([]:list term) 0%nat ltac:(fun f _ csts _ =>
@@ -910,6 +915,16 @@ Qed.
 Goal forall a b, exists x, 2 * a - 3 * b + 1 <= x /\ (x < a + b \/ x < 2 * a).
   intros a b. qe.
 Abort.
+
+Fixpoint expensive (x: nat): nat :=
+  match x with
+  | O => O
+  | S n => expensive n + expensive n
+  end.
+
+Goal Z.of_nat (expensive 40) <= Z.of_nat (expensive 40).
+  qe. omega.
+Qed.
 
 (*
 Goal forall a b c,
