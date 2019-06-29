@@ -706,7 +706,7 @@ Ltac reflect_term term unshift csts cid cont :=
     ) else tryif is_ground_Z y then (
       denote_term y ltac:(fun k =>
       reflect_term x unshift csts cid ltac:(fun t unshift csts cid =>
-      cont (RMul2 k t) unshift csts cid))
+      cont (RMul2 t k) unshift csts cid))
     ) else (
       reflect_term_denote term unshift csts cid cont
     )
@@ -859,6 +859,10 @@ Ltac qe_in H :=
 
 Tactic Notation "qe" "in" ident(H) :=
   qe_in H.
+
+Goal exists b, 0 <= b * 90.
+  qe. auto.
+Qed.
 
 Goal exists x, 0 <= 2 * x + 5 \/ x > 3.
   qe. auto.
