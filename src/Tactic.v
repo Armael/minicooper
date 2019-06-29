@@ -676,8 +676,20 @@ Ltac try_lookup_constant c csts idx cont_found cont_fail :=
     try_lookup_constant c csts' (S idx) cont_found cont_fail
   end.
 
+Ltac reflect_term_denote term unshift csts cid cont :=
+  tryif is_ground_Z term then
+    denote_term term ltac:(fun k =>
+    cont (RGround k) unshift csts cid)
+  else
+    try_lookup_constant term csts O
+      ltac:(fun idx =>
+        let cidx := eval cbv in (cid - idx - 1)%nat in
+        cont (RAbstract cidx) unshift csts cid)
+      ltac:(fun tt =>
+        cont (RAbstract cid) unshift (term::csts) (S cid)).
+
 Ltac reflect_term term unshift csts cid cont :=
-  match term with
+  lazymatch term with
   | tApp (tConst "Coq.ZArith.BinIntDef.Z.add" []) [?x; ?y] =>
     reflect_term x unshift csts cid ltac:(fun t1 unshift csts cid =>
     reflect_term y unshift csts cid ltac:(fun t2 unshift csts cid =>
@@ -695,7 +707,9 @@ Ltac reflect_term term unshift csts cid cont :=
       denote_term y ltac:(fun k =>
       reflect_term x unshift csts cid ltac:(fun t unshift csts cid =>
       cont (RMul2 k t) unshift csts cid))
-    ) else fail
+    ) else (
+      reflect_term_denote term unshift csts cid cont
+    )
   | tApp (tConst "Coq.ZArith.BinIntDef.Z.opp" []) [?x] =>
     reflect_term x unshift csts cid ltac:(fun t unshift csts cid =>
     cont (ROpp t) unshift csts cid)
@@ -703,16 +717,7 @@ Ltac reflect_term term unshift csts cid cont :=
     let n := eval cbv in (n - unshift)%nat in
     cont (RVar n) unshift csts cid
   | ?x =>
-    tryif is_ground_Z x then
-      denote_term x ltac:(fun k =>
-      cont (RGround k) unshift csts cid)
-    else
-      try_lookup_constant x csts O
-        ltac:(fun idx =>
-          let cidx := eval cbv in (cid - idx - 1)%nat in
-          cont (RAbstract cidx) unshift csts cid)
-        ltac:(fun tt =>
-          cont (RAbstract cid) unshift (x::csts) (S cid))
+    reflect_term_denote x unshift csts cid cont
   end.
 
 Ltac reflect_predicate term unshift csts cid cont :=

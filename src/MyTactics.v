@@ -49,7 +49,7 @@ Ltac unpack1 :=
   match goal with
   | h: ex _ |- _ => destruct h
   | h: (_ /\ _) |- _ => destruct h
-  | h: exists2 x, _ & _ |- _ => destruct h
+  | h: exists2 _, _ & _ |- _ => destruct h
   end.
 
 Tactic Notation "unpack" :=
